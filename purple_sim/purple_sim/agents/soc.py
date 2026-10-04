@@ -33,7 +33,8 @@ class SOCBlue(BlueAgent):
     INVESTIGATE_AT = 1.0
     NEIGHBOUR_BOOST = 0.4  # how much a noisy neighbour adds to a host's score
     WEAK_SENSOR = 0.3      # ENDPOINT coverage at/below this is a blind spot
-    COST = {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3}
+    COST = {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3,
+            "DECOY": 1, "ROTATE_CREDS": 2}
 
     def __init__(self) -> None:
         self.reset()
@@ -129,3 +130,42 @@ class SOCBlue(BlueAgent):
                 return blue(BlueActionType.INVESTIGATE.value, name)
 
         return Action(Faction.BLUE, BlueActionType.MONITOR.value, {})
+
+
+class AdaptiveBlue(SOCBlue):
+    """SOCBlue plus proactive tools: a canary on the crown jewel, and credential
+    rotation on an identity host under attack (revoking the attacker's domain
+    reach). Everything else falls through to SOCBlue's triage/containment.
+    """
+
+    def reset(self) -> None:
+        super().reset()
+        self._decoyed: set = set()
+
+    def act(self, blue_view: dict):
+        now = blue_view["step"]
+        nodes = blue_view["nodes"]
+        budget_on = blue_view.get("analyst_budget", 0)
+        self._budget = blue_view.get("analyst_remaining") if budget_on else None
+
+        def blue(kind, target):
+            return Action(Faction.BLUE, kind, {"target": target})
+
+        # 1. Plant a canary on the crown jewel once — a cheap, reliable tripwire
+        #    on the thing that actually matters.
+        jewel = next((n for n, i in nodes.items() if i["is_crown_jewel"]), None)
+        if (jewel and jewel not in self._decoyed and not nodes[jewel].get("decoy")
+                and self._afford("DECOY")):
+            self._decoyed.add(jewel)
+            return blue(BlueActionType.DECOY.value, jewel)
+
+        # 2. Rotate credentials on an identity host under strong, recent attack,
+        #    to revoke any domain-admin reach the attacker may have gained.
+        scores = self._scores(blue_view["telemetry"], nodes, now)
+        for name, score in sorted(scores.items(), key=lambda kv: -kv[1]):
+            info = nodes.get(name, {})
+            if (info.get("is_identity") and score >= self.CONTAIN_AT
+                    and not info.get("restoring") and self._afford("ROTATE_CREDS")):
+                return blue(BlueActionType.ROTATE_CREDS.value, name)
+
+        return super().act(blue_view)

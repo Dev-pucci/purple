@@ -127,6 +127,26 @@ combination drives the attacker's win rate into the ground, but the order you
 spend in should depend on which regime you're in — and this model lets you tell
 which one that is.
 
+## Finding 6 — the right tools beat more of the same
+
+A third defender, `AdaptiveBlue`, adds two targeted capabilities to SOCBlue: a
+**canary on the crown jewel** (a reliable tripwire regardless of sensor
+coverage) and **credential rotation** on an identity host under attack (revoking
+any domain-admin reach). On enterprise (300 games each):
+
+| Defender | Red win % [95% CI] | Blue score | coverage % |
+|---|---|---|---|
+| heuristic | 63% [57, 68] | −17 | 31 |
+| soc | 56% [50, 62] | −40 | 29 |
+| **adaptive** | **22% [18, 27]** | **−6** | **42** |
+
+Two cheap, well-placed controls — a tripwire on the asset that matters and
+hygiene on the identity tier — cut the attacker's success by two-thirds and
+*improved* availability (least-negative Blue score), far outperforming both
+better triage (soc) and the generic sensor/budget levers of Finding 2.
+**Placement and control *type* dominate control *volume*.** (The soc-vs-heuristic
+gap, by contrast, is within the error bars here — a reminder to read the CIs.)
+
 ## Finding 5 — architecture matters as much as the defender
 
 The same competent defender (`SOCBlue`) on two postures (300 games each):

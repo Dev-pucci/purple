@@ -628,6 +628,40 @@ def test_scenario_json_rejects_malformed():
         assert "crown_jewel" in str(e)
 
 
+def test_decoy_catches_red_even_on_a_sensorless_host():
+    env = Environment(config={"seed": 50, "noise_per_step": 0})
+    give_foothold(env, "app_server")
+    mark_scanned(env, "workstation")          # EDR-less host: normally a blind spot
+    env.nodes["workstation"].vulnerabilities[0].success_prob = 1.0
+    env.nodes["workstation"].vulnerabilities[0].detection_prob = 1.0
+    env.step(WAIT, blue("DECOY", "workstation"))
+    assert env.nodes["workstation"].decoy
+    env.step(red("EXPLOIT", target="workstation"), MONITOR)
+    assert any(e.node == "workstation" and e.is_true_positive for e in attack_events(env))
+
+
+def test_rotate_creds_revokes_admin_and_domain_reach():
+    env = Environment(config={"seed": 51})
+    env.nodes["app_server"].is_identity = True
+    give_foothold(env, "app_server", AccessLevel.ADMIN)
+    env.red.discovered.add("db_cluster")
+    assert env.red_view()["nodes"]["db_cluster"]["lateral_from"] == ["app_server"]
+    r = env.step(WAIT, blue("ROTATE_CREDS", "app_server"))
+    assert r.blue_effective and env.nodes["app_server"].access == AccessLevel.USER
+    assert env.red_view()["nodes"]["db_cluster"]["lateral_from"] == []   # domain reach gone
+    assert "app_server" in env.red.footholds                             # still holds it at USER
+
+
+def test_adaptive_blue_runs_and_uses_its_tools():
+    env = Environment(config={"seed": 52})
+    report = Orchestrator(env, make_red("heuristic"), make_blue("adaptive"),
+                          SimConfig(verbose=False, show_report=False)).run()
+    assert report["winner"] in ("RED", "BLUE")
+    used = {h.blue_action.type for h in env.history}
+    assert "DECOY" in used                              # planted a canary at least once
+    assert env.analyst_remaining >= 0
+
+
 def test_identity_host_admin_grants_domain_wide_lateral():
     from purple_sim.env.models import Node, Vulnerability
     rce = Vulnerability("T1190", "x", "C", 1.0, 0.0, service="http")

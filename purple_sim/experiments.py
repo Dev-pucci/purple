@@ -17,14 +17,14 @@ import statistics
 from collections import defaultdict
 
 from purple_sim.agents.heuristic import HeuristicBlue, HeuristicRed
-from purple_sim.agents.soc import SOCBlue
+from purple_sim.agents.soc import AdaptiveBlue, SOCBlue
 from purple_sim.env.environment import Environment
 from purple_sim.env.models import Sensor
 from purple_sim.env.scenario import FIREWALL, make_network
 from purple_sim.orchestrator import Orchestrator, SimConfig
 from purple_sim.stats import compare_proportions, mean_pm, pct_ci
 
-BLUES = {"heuristic": HeuristicBlue, "soc": SOCBlue}
+BLUES = {"heuristic": HeuristicBlue, "soc": SOCBlue, "adaptive": AdaptiveBlue}
 SEED_BASE = 5000
 
 

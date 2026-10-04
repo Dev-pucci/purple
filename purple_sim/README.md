@@ -34,6 +34,10 @@ What the model says so far (details and caveats in [`ANALYSIS.md`](ANALYSIS.md))
   blind hosts raised their coverage but didn't change who won.
 - **Architecture is a top-tier control.** The same defender holds the attacker
   to a coin-flip on a segmented network but loses ~92% of the time on a flat one.
+- **The right tools beat more of the same.** A defender that plants a canary on
+  the crown jewel and rotates credentials on the identity tier (`--blue adaptive`)
+  cuts the attacker's win rate to ~22% on enterprise (vs ~56–63% for triage-only
+  defenders) *and* improves availability — placement and control type beat volume.
 - **RL as a model auditor.** A learned attacker plateaus level with the scripted
   kill chain (it's near-forced); a learned defender first *reward-hacked* into
   scorched-earth denial, then — once trained against an availability-priced
@@ -61,7 +65,7 @@ environment, so you can mix and match.
 
 | Family | Where | Needs |
 |---|---|---|
-| **Heuristic** | `agents/heuristic.py`, `agents/soc.py` | nothing — deterministic baselines (`heuristic` and the stronger budget-aware `soc` Blue) |
+| **Heuristic** | `agents/heuristic.py`, `agents/soc.py` | nothing — deterministic baselines: `heuristic`, the budget-aware `soc`, and `adaptive` (canaries + credential rotation) Blue |
 | **LLM** | `agents/llm_agents.py` | nothing in *mock* mode; `anthropic` + API key for *live* |
 | **RL** | `agents/rl_interface.py`, `agents/gym_env.py`, `train_rl.py` | nothing for the stub; `gymnasium` + `stable-baselines3` + `sb3-contrib` to train |
 
@@ -321,7 +325,7 @@ purple_sim/
     agents/
       base.py                # RedAgent / BlueAgent interfaces
       heuristic.py           # deterministic baselines (kill-chain Red, SOC-analyst Blue)
-      soc.py                 # stronger budget-aware Blue (--blue soc)
+      soc.py                 # budget-aware Blue (--blue soc) + AdaptiveBlue (--blue adaptive)
       llm_agents.py          # mock + live Claude agents (tool-calling)
       rl_interface.py        # zero-dep Gym-style env, PolicyRed, RL stub
       gym_env.py             # gymnasium adapter + loading a trained policy

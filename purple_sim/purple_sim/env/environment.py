@@ -191,9 +191,16 @@ class Environment:
         return node.vulnerabilities[0].technique_id if node.vulnerabilities else "T1190"
 
     def _emit(self, kind: EventKind, node: Node, technique: str, base: float) -> bool:
-        """Log an attack action, folding in the host's sensor coverage + monitoring."""
-        coverage = node.sensor_coverage(EVENT_SENSOR[kind].value)
-        prob = min(1.0, base * coverage + node.monitoring)
+        """Log an attack action, folding in the host's sensor coverage + monitoring.
+
+        A decoy (canary) on the host catches any Red activity reliably, whatever
+        the sensor coverage — that is the point of a tripwire.
+        """
+        if node.decoy:
+            prob = 1.0
+        else:
+            coverage = node.sensor_coverage(EVENT_SENSOR[kind].value)
+            prob = min(1.0, base * coverage + node.monitoring)
         return self.bus.emit_attack(self.step_count, kind, node.name, technique, prob)
 
     def _grant(self, name: str, level: int, rec: StepResult) -> None:
@@ -254,10 +261,12 @@ class Environment:
                     "segment": node.segment,
                     "is_crown_jewel": node.is_crown_jewel,
                     "sensors": {s: round(c, 2) for s, c in node.sensors.items()},
+                    "is_identity": node.is_identity,
                     "isolated": node.isolated,
                     "monitoring": round(node.monitoring, 2),
                     "restoring": node.restoring > 0,
                     "patching": node.patching > 0,
+                    "decoy": node.decoy,
                 }
                 for name, node in self.nodes.items()
             },
@@ -470,6 +479,24 @@ class Environment:
             rec.blue_effective = True
             tag = "evicted active intruder" if was_compromised else "no intruder found (wasted)"
             return f"RESTORE {target}: re-imaging ({tag})."
+
+        if a == BlueActionType.DECOY.value:
+            if node.decoy:
+                return f"DECOY {target}: canary already deployed (no-op)."
+            node.decoy = True
+            rec.blue_effective = True
+            return f"DECOY {target}: canary deployed (Red activity here is caught reliably)."
+
+        if a == BlueActionType.ROTATE_CREDS.value:
+            # Revoke stolen admin credentials: Red keeps any USER foothold but
+            # loses ADMIN (and, on an identity host, its domain-wide reach) until
+            # it escalates again. Doesn't evict and costs no downtime.
+            if node.access < AccessLevel.ADMIN:
+                return f"ROTATE_CREDS {target}: nothing to revoke (no ADMIN here)."
+            node.access = AccessLevel.USER
+            rec.blue_effective = True
+            extra = " (domain credentials revoked)" if node.is_identity else ""
+            return f"ROTATE_CREDS {target}: admin credentials rotated{extra}."
 
         return f"Unknown Blue action {a!r}."
 

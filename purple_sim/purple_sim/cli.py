@@ -180,7 +180,8 @@ def main(argv=None) -> None:
     p.add_argument("--red", default="heuristic", choices=["heuristic", "llm", "rl"])
     p.add_argument("--rl-model", default="models/ppo_red.zip",
                    help="Trained PPO model for --red rl (see train_rl.py).")
-    p.add_argument("--blue", default="heuristic", choices=["heuristic", "soc", "llm", "rl"])
+    p.add_argument("--blue", default="heuristic",
+                   choices=["heuristic", "soc", "adaptive", "llm", "rl"])
     p.add_argument("--rl-blue-model", default="models/ppo_blue.zip",
                    help="Trained model for --blue rl (see train_rl.py --side blue).")
     p.add_argument("--live", action="store_true",

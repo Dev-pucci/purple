@@ -33,6 +33,8 @@ class BlueActionType(str, Enum):
     ISOLATE = "ISOLATE"        # cut a node off: blocks exploit/lateral, hurts availability
     PATCH = "PATCH"            # remove a node's vulnerabilities (prevents exploit)
     RESTORE = "RESTORE"        # re-image a node: evicts Red if present, costs availability
+    DECOY = "DECOY"            # plant a canary on a node: any Red action there is caught reliably
+    ROTATE_CREDS = "ROTATE_CREDS"  # rotate credentials: revokes Red's ADMIN (and domain reach)
 
 
 # --- telemetry -----------------------------------------------------------------
@@ -106,6 +108,7 @@ class Node:
     monitoring: float = 0.0    # extra detection probability added by Blue
     restoring: int = 0         # steps remaining in a RESTORE operation
     patching: int = 0          # steps remaining in a PATCH maintenance window
+    decoy: bool = False        # a canary is planted here: Red activity is caught reliably
 
     @property
     def compromised(self) -> bool:
