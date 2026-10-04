@@ -16,6 +16,24 @@ abstract network-as-a-game (CyberBattleSim), separate delayed Blue telemetry
 (NetForge RL), a turn-based LLM orchestration loop (Kriegsspiel), and ATT&CK
 technique IDs as shared vocabulary.
 
+## Key findings
+
+What the model says so far (details and caveats in [`ANALYSIS.md`](ANALYSIS.md)):
+
+- **Who runs the controls matters most.** Swapping the naive defender for a
+  budget-disciplined one (`--blue soc`) cuts the attacker's win rate by a third
+  on the same network, before buying anything.
+- **For a competent defender, detection *speed* beats more sensors or
+  analysts.** Halving log latency collapses the attacker (44% → 7% win rate);
+  a bigger analyst budget does nothing. Holds against a *trained* attacker too.
+- **Sensors buy visibility, not outcomes, off the attack path.** Adding EDR to
+  blind hosts raised their coverage 5% → 18% but didn't change who won.
+- **Architecture is a top-tier control.** The same defender survives 43% on a
+  segmented network vs 14% on a flat one.
+- **RL honesty checks.** A learned attacker plateaus level with the scripted
+  kill chain (the chain is near-forced); a learned defender first *reward-hacked*
+  into scorched-earth denial until trained against an availability-priced score.
+
 ## Quick start (zero dependencies)
 
 ```bash

@@ -79,6 +79,14 @@ def _loader(cls, label):
 
     def load(path, **kw):
         model = MaskablePPO.load(path, device="cpu")
+        agent = cls(lambda obs, mask: 0, default_network(), label=label, **kw)
+        expected = len(agent.action_table)
+        actual = int(model.action_space.n)
+        if actual != expected:
+            raise ValueError(
+                f"{path} has {actual} actions but the current {label} action table has "
+                f"{expected} (the action set changed since it was trained). Retrain with "
+                f"train_rl.py and point --rl-model / --rl-blue-model at the new file.")
 
         def predict(obs, mask):
             action, _ = model.predict(np.asarray(obs, dtype=np.float32),
@@ -86,7 +94,8 @@ def _loader(cls, label):
                                       deterministic=True)
             return int(action)
 
-        return cls(predict, default_network(), label=label, **kw)
+        agent.predict = predict
+        return agent
     return load
 
 
