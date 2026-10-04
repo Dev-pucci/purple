@@ -116,6 +116,38 @@ def study_sensitivity(args):
               f"{statistics.mean(r['coverages']):>12.1f}{ws:>11.0f}")
 
 
+def write_html(args):
+    """Run the defender comparison + blind-spot map and write an HTML report."""
+    from purple_sim.report import build_report
+    from purple_sim.stats import pct_ci
+    defenders = []
+    best = None
+    for name, cls in BLUES.items():
+        r = play(args.scenario, cls, args.episodes)
+        defenders.append({"name": name, "red_win": r["red_win"],
+                          "red_win_label": pct_ci(r["wins"], r["n"]),
+                          "blue_score": statistics.mean(r["blue_scores"]),
+                          "coverage": statistics.mean(r["coverages"])})
+        if best is None or r["red_win"] < best[0]:
+            best = (r["red_win"], name, r)
+    _, best_name, best_r = best
+    blind = sorted(((h, ex, det) for h, (ex, det) in best_r["host"].items()),
+                   key=lambda t: (t[2] / t[1] if t[1] else 0))
+    findings = [
+        f"Best defender here: '{best_name}' holds the attacker to "
+        f"{best_r['red_win']:.0f}% wins.",
+        "Hosts flagged 'blind spot' see real attacks but rarely trigger a response "
+        "- usually a sensor gap or a host off the attack path.",
+        "Detection speed and the right controls (deception, identity hygiene) move "
+        "the outcome more than sensor or analyst volume - see ANALYSIS.md.",
+    ]
+    html_text = build_report(f"purple_sim - {args.scenario} assessment", args.scenario,
+                             defenders, blind, findings, args.episodes)
+    with open(args.html, "w", encoding="utf-8") as fh:
+        fh.write(html_text)
+    print(f"Wrote HTML report -> {args.html}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--study", default="all",
@@ -123,7 +155,11 @@ def main():
     p.add_argument("--scenario", default="enterprise")
     p.add_argument("--blue", default="soc", choices=list(BLUES))
     p.add_argument("--episodes", type=int, default=300)
+    p.add_argument("--html", help="Write a shareable HTML report to this path instead of text.")
     args = p.parse_args()
+    if args.html:
+        write_html(args)
+        return
     if args.study in ("all", "defenders"):
         study_defenders(args)
     if args.study in ("all", "posture"):

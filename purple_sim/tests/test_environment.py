@@ -54,6 +54,20 @@ def attack_events(env):
 
 
 # ----------------------------------------------------------------- basics
+def test_html_report_builds_both_forms():
+    from purple_sim.report import build_report
+    defs = [{"name": "soc", "red_win": 40.0, "red_win_label": "40% [34, 46]",
+             "blue_score": 12.0, "coverage": 35.0}]
+    blind = [("workstation", 40, 0), ("db_cluster", 100, 60)]
+    find = ["speed beats sensors"]
+    full = build_report("T", "enterprise", defs, blind, find, 200, standalone=True)
+    inner = build_report("T", "enterprise", defs, blind, find, 200, standalone=False)
+    assert full.startswith("<!doctype html>") and "</html>" in full
+    assert not inner.lstrip().startswith("<!doctype") and "<title>" in inner
+    for frag in ("blind-spot", "soc", "workstation", "35%"):
+        assert frag in full
+
+
 def test_stats_intervals_and_significance():
     from purple_sim.stats import (compare_proportions, mean_ci, pct_ci,
                                    wilson_interval)

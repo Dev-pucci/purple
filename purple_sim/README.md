@@ -244,7 +244,12 @@ and run it:
 ```bash
 python run.py --scenario-file scenarios/enterprise.json --episodes 200 --quiet --blue soc
 python run.py --analyze --scenario-file my_site.json --blue soc    # blind-spot map for your file
+python experiments.py --scenario enterprise --html report.html     # shareable HTML report
 ```
+
+That last command is the "product surface" over the CLI engine: a self-contained
+HTML page (defender comparison, blind-spot map, findings) a non-engineer can
+read or share — the kind of deliverable a detection-coverage assessment ships.
 
 ## Why the design choices matter
 
@@ -332,6 +337,7 @@ purple_sim/
       llm_agents.py          # mock + live Claude agents (tool-calling)
       rl_interface.py        # zero-dep Gym-style env, PolicyRed, RL stub
       gym_env.py             # gymnasium adapter + loading a trained policy
+    report.py                # render results as a shareable self-contained HTML page
     scoring/
       scorer.py              # Red/Blue scores + Purple coverage report
     orchestrator.py          # turn loop + trace + report printing
