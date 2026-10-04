@@ -53,10 +53,12 @@ def main() -> None:
     p.add_argument("--model", default="models/ppo_red.zip")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--eval-only", action="store_true")
+    p.add_argument("--shaping", action="store_true",
+                   help="Add potential-based milestone rewards (ADMIN, inside secure).")
     args = p.parse_args()
 
     if not args.eval_only:
-        env = GymRedEnv(seed=args.seed)
+        env = GymRedEnv(seed=args.seed, shaping=args.shaping)
         model = MaskablePPO("MlpPolicy", env, ent_coef=0.01, seed=args.seed,
                             device="cpu", verbose=0)
         start = time.time()

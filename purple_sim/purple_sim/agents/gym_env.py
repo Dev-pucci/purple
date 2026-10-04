@@ -22,9 +22,10 @@ class GymRedEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, blue_policy: Optional[BlueAgent] = None, seed: int = 0):
+    def __init__(self, blue_policy: Optional[BlueAgent] = None, seed: int = 0,
+                 shaping: bool = False):
         super().__init__()
-        self.inner = PurpleRedEnv(blue_policy=blue_policy, seed=seed)
+        self.inner = PurpleRedEnv(blue_policy=blue_policy, seed=seed, shaping=shaping)
         self.inner.reset()
         self.observation_space = spaces.Box(0.0, 1.0, (self.inner.obs_dim,), dtype=np.float32)
         self.action_space = spaces.Discrete(self.inner.action_space_n)

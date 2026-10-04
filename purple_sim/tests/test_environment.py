@@ -432,6 +432,24 @@ def test_rl_env_runs():
     assert done
 
 
+def test_milestone_shaping_potential():
+    from purple_sim.agents.rl_interface import (ADMIN_MILESTONE, SECURE_MILESTONE,
+                                                milestone_potential)
+    env = Environment(config={"seed": 33})
+    assert milestone_potential(env) == 0
+    give_foothold(env, "app_server", AccessLevel.ADMIN)
+    assert milestone_potential(env) == ADMIN_MILESTONE * env.nodes["app_server"].value
+    give_foothold(env, "db_cluster", AccessLevel.USER)      # inside the secure zone
+    assert milestone_potential(env) == (ADMIN_MILESTONE * env.nodes["app_server"].value
+                                        + SECURE_MILESTONE)
+    env.step(WAIT, blue("RESTORE", "db_cluster"))           # eviction takes it back
+    assert milestone_potential(env) == ADMIN_MILESTONE * env.nodes["app_server"].value
+    shaped = PurpleRedEnv(seed=34, shaping=True)
+    shaped.reset()
+    _, reward, _, _ = shaped.step(0)
+    assert isinstance(reward, float)
+
+
 def test_rl_episodes_use_fresh_seeds():
     env = PurpleRedEnv(seed=27)
     env.reset()

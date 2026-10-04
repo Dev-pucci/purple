@@ -19,6 +19,7 @@ from typing import Callable, Dict, List, Optional
 
 from ..env.environment import Environment
 from ..env.models import AccessLevel, Action, Faction, Node, RedActionType
+from ..env.scenario import ADMIN_SEGMENTS
 from ..scoring.scorer import Scorer
 from .base import BlueAgent, RedAgent
 from .heuristic import HeuristicBlue
@@ -98,6 +99,25 @@ def _default_factory(seed: int) -> Environment:
     return Environment(config={"seed": seed})
 
 
+# Milestone shaping (opt-in). Potential-based (Ng et al. 1999): the bonus is
+# gamma * phi(next) - phi(current), with phi = 0 at episode end, so it guides
+# learning through the long chain without changing which policy is optimal,
+# and an eviction takes the milestone credit back.
+SHAPING_GAMMA = 0.99          # match PPO's default discount
+ADMIN_MILESTONE = 3.0         # per unit of node value held at ADMIN
+SECURE_MILESTONE = 10.0       # for holding any node inside an admin segment
+
+
+def milestone_potential(env: Environment) -> float:
+    phi = 0.0
+    for node in env.nodes.values():
+        if node.access >= AccessLevel.ADMIN:
+            phi += ADMIN_MILESTONE * node.value
+    if any(env.nodes[f].segment in ADMIN_SEGMENTS for f in env.red.footholds):
+        phi += SECURE_MILESTONE
+    return phi
+
+
 class PurpleRedEnv:
     """Single-agent RL environment where the *Red* agent is the learner.
 
@@ -107,14 +127,17 @@ class PurpleRedEnv:
     Reward per step = change in Red's ground-truth position (footholds, +exfil
     bonus; negative when evicted) + the stealth bonus for footholds Blue hasn't
     seen yet - a small penalty for moves that didn't reach the network.
+    With `shaping=True`, a potential-based milestone bonus is added for
+    reaching ADMIN and getting inside an admin segment.
     """
 
     def __init__(self, blue_policy: Optional[BlueAgent] = None,
                  env_factory: Callable[[int], Environment] = _default_factory,
-                 seed: int = 0):
+                 seed: int = 0, shaping: bool = False):
         self._env_factory = env_factory
         self.blue = blue_policy or HeuristicBlue()
         self.seed_rng = random.Random(seed)
+        self.shaping = shaping
         self.env: Optional[Environment] = None
         self.node_names: List[str] = []
         self.action_table: List[Action] = []
@@ -148,6 +171,7 @@ class PurpleRedEnv:
         red_action = self.action_table[action_index % len(self.action_table)]
 
         before = self._scorer.score_state(self.env)
+        phi_before = milestone_potential(self.env) if self.shaping else 0.0
         result = self.env.step(red_action, self.blue.act)  # Blue decides mid-turn
         after = self._scorer.score_state(self.env)
 
@@ -155,6 +179,9 @@ class PurpleRedEnv:
         reward += self._scorer.STEALTH_PER_STEP * result.undetected_footholds
         if red_action.type != RedActionType.WAIT.value and not result.red_executed:
             reward -= INVALID_ACTION_PENALTY
+        if self.shaping:
+            phi_after = 0.0 if result.done else milestone_potential(self.env)
+            reward += SHAPING_GAMMA * phi_after - phi_before
         info = {"red_outcome": result.red_outcome, "blue_outcome": result.blue_outcome,
                 "winner": self.env.winner}
         return self._encode_obs(), reward, result.done, info
