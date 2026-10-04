@@ -1,0 +1,112 @@
+"""Command-line entry point.
+
+Examples
+--------
+  python -m purple_sim.cli                         # heuristic vs heuristic
+  python -m purple_sim.cli --red llm --blue llm    # mock-LLM both sides (offline)
+  python -m purple_sim.cli --red llm --live        # real Claude Red (needs API key)
+  python -m purple_sim.cli --episodes 20 --quiet   # batch run, averaged coverage
+  python -m purple_sim.cli --rl-demo               # random RL agent on the gym env
+"""
+from __future__ import annotations
+
+import argparse
+import statistics
+
+from .agents import make_blue, make_red
+from .agents.rl_interface import PurpleRedEnv, RandomRLAgent, train_notes
+from .env.environment import Environment
+from .orchestrator import Orchestrator, SimConfig
+
+
+def _report_fallbacks(args, agents_turns) -> None:
+    """With --live, say how many turns the LLM didn't actually decide."""
+    if not args.live:
+        return
+    for label, agents, turns in agents_turns:
+        fell_back = sum(getattr(a, "fallbacks", 0) for a in agents)
+        if fell_back:
+            print(f"[llm] {label}: {fell_back}/{turns} turns fell back to the heuristic brain.")
+
+
+def _single(args) -> dict:
+    env = Environment(config={"seed": args.seed})
+    red = make_red(args.red, mock=not args.live)
+    blue = make_blue(args.blue, mock=not args.live)
+    orch = Orchestrator(env, red, blue,
+                        SimConfig(verbose=not args.quiet, color=not args.no_color,
+                                  show_report=True))
+    report = orch.run()
+    _report_fallbacks(args, [("Red", [red], env.step_count),
+                             ("Blue", [blue], env.step_count)])
+    return report
+
+
+def _batch(args) -> None:
+    coverages, red_scores, blue_scores, red_wins, blue_wins = [], [], [], 0, 0
+    reds, blues, turns = [], [], 0
+    for i in range(args.episodes):
+        env = Environment(config={"seed": args.seed + i})
+        red = make_red(args.red, mock=not args.live)
+        blue = make_blue(args.blue, mock=not args.live)
+        report = Orchestrator(env, red, blue,
+                              SimConfig(verbose=False, show_report=False)).run()
+        reds.append(red)
+        blues.append(blue)
+        turns += env.step_count
+        coverages.append(report["coverage_pct"])
+        red_scores.append(report["red_score"])
+        blue_scores.append(report["blue_score"])
+        if report["winner"] == "RED":
+            red_wins += 1
+        else:
+            blue_wins += 1
+    print(f"\n=== BATCH: {args.episodes} episodes ({args.red} Red vs {args.blue} Blue) ===")
+    print(f"Red wins:  {red_wins}")
+    print(f"Blue wins: {blue_wins}")
+    print(f"Mean scores: Red {statistics.mean(red_scores):.1f}   "
+          f"Blue {statistics.mean(blue_scores):.1f}")
+    print(f"Mean Purple coverage: {statistics.mean(coverages):.1f}% "
+          f"(min {min(coverages):.0f} / max {max(coverages):.0f})")
+    _report_fallbacks(args, [("Red", reds, turns), ("Blue", blues, turns)])
+
+
+def _rl_demo(args) -> None:
+    env = PurpleRedEnv(seed=args.seed)
+    agent = RandomRLAgent(env, seed=args.seed)
+    obs = env.reset()
+    total = 0.0
+    done = False
+    while not done:
+        action = agent.act(obs)
+        obs, reward, done, info = env.step(action)
+        total += reward
+    print("=== RL DEMO (random Red agent vs heuristic Blue) ===")
+    print(f"Episode return: {total:.1f}   winner: {info['winner']}   "
+          f"obs_dim={env.obs_dim}   actions={env.action_space_n}")
+    print("\n" + train_notes())
+
+
+def main(argv=None) -> None:
+    p = argparse.ArgumentParser(description="Purple Team Red-vs-Blue simulation.")
+    p.add_argument("--red", default="heuristic", choices=["heuristic", "llm"])
+    p.add_argument("--blue", default="heuristic", choices=["heuristic", "llm"])
+    p.add_argument("--live", action="store_true",
+                   help="Use the real Claude API for LLM agents (needs ANTHROPIC_API_KEY).")
+    p.add_argument("--episodes", type=int, default=1, help="Run N games and average.")
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--quiet", action="store_true", help="Suppress per-turn trace.")
+    p.add_argument("--no-color", action="store_true")
+    p.add_argument("--rl-demo", action="store_true", help="Run the Gym-style RL demo.")
+    args = p.parse_args(argv)
+
+    if args.rl_demo:
+        _rl_demo(args)
+    elif args.episodes > 1:
+        _batch(args)
+    else:
+        _single(args)
+
+
+if __name__ == "__main__":
+    main()
