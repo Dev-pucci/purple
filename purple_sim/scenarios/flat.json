@@ -1,0 +1,315 @@
+{
+  "firewall": {
+    "internet": [
+      "dmz"
+    ],
+    "dmz": [
+      "dmz",
+      "internal"
+    ],
+    "internal": [
+      "dmz",
+      "internal",
+      "secure"
+    ],
+    "secure": [
+      "internal",
+      "secure"
+    ]
+  },
+  "nodes": [
+    {
+      "name": "router",
+      "segment": "dmz",
+      "value": 1,
+      "services": [
+        "https"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.6,
+        "ENDPOINT": 0.3
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1190",
+          "name": "Exploit Public-Facing Application",
+          "cve": "CVE-FLAT-01",
+          "success": 0.7,
+          "detection": 0.4,
+          "service": "https",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CRED-router",
+          "success": 0.3,
+          "detection": 0.3,
+          "service": "auth",
+          "grants": "USER",
+          "local": false,
+          "patchable": false
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-router",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ],
+      "entry": true
+    },
+    {
+      "name": "lan_switch",
+      "segment": "internal",
+      "value": 1,
+      "services": [
+        "snmp"
+      ],
+      "connections": [
+        "router",
+        "pc_1",
+        "pc_2",
+        "accounts_pc",
+        "nas",
+        "db"
+      ],
+      "sensors": {
+        "NETWORK": 0.5,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-FLAT-02",
+          "success": 0.6,
+          "detection": 0.4,
+          "service": "snmp",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-lan_switch",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "pc_1",
+      "segment": "internal",
+      "value": 1,
+      "services": [
+        "smb"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.4,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CVE-FLAT-03",
+          "success": 0.6,
+          "detection": 0.3,
+          "service": "smb",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-pc_1",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "pc_2",
+      "segment": "internal",
+      "value": 1,
+      "services": [
+        "smb"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.4,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CVE-FLAT-04",
+          "success": 0.6,
+          "detection": 0.3,
+          "service": "smb",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-pc_2",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "accounts_pc",
+      "segment": "internal",
+      "value": 3,
+      "services": [
+        "smb",
+        "rdp"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.4,
+        "ENDPOINT": 0.2
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CVE-FLAT-05",
+          "success": 0.6,
+          "detection": 0.3,
+          "service": "rdp",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-accounts_pc",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "nas",
+      "segment": "internal",
+      "value": 3,
+      "services": [
+        "smb",
+        "nfs"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.5,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-FLAT-06",
+          "success": 0.6,
+          "detection": 0.4,
+          "service": "smb",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-nas",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "segment": "internal",
+      "value": 5,
+      "services": [
+        "mysql"
+      ],
+      "connections": [
+        "lan_switch"
+      ],
+      "sensors": {
+        "NETWORK": 0.5,
+        "ENDPOINT": 0.4
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-FLAT-07",
+          "success": 0.55,
+          "detection": 0.5,
+          "service": "mysql",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-db",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ],
+      "crown_jewel": true
+    }
+  ]
+}

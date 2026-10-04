@@ -223,6 +223,16 @@ Four scenarios, all in `env/scenario.py`:
 Pick the archetype closest to a real site and edit it to model that site; the
 model needs only shapes and sensor coverage, no secrets.
 
+To model a site without touching code, describe it in a JSON file (see
+[`scenarios/enterprise.json`](scenarios/enterprise.json) for the full schema —
+zones, hosts, connections, per-host sensor coverage, vulnerabilities, firewall)
+and run it:
+
+```bash
+python run.py --scenario-file scenarios/enterprise.json --episodes 200 --quiet --blue soc
+python run.py --analyze --scenario-file my_site.json --blue soc    # blind-spot map for your file
+```
+
 ## Why the design choices matter
 
 - **Ground truth is private.** `Environment.blue_view()` never exposes a node's
@@ -296,7 +306,8 @@ purple_sim/
     env/
       models.py              # Node, Vulnerability, Action, TelemetryEvent, AccessLevel, Sensor
       attack_catalog.py      # MITRE ATT&CK technique labels
-      scenario.py            # default + random networks, config
+      scenario.py            # default/random/enterprise/flat networks, config
+      scenario_io.py         # load/save a network as JSON (--scenario-file)
       telemetry.py           # noisy/delayed Blue feed
       environment.py         # state machine, views, turn resolution
     agents/

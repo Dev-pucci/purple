@@ -590,6 +590,44 @@ def test_heuristic_red_reaches_admin_and_exfiltrates_sometimes():
     assert wins > 0   # the kill chain can actually complete
 
 
+def test_scenario_json_round_trips_and_runs(tmp_path=None):
+    import os, tempfile
+    from purple_sim.env.scenario import FIREWALL, enterprise_network
+    from purple_sim.env.scenario_io import export_scenario, load_scenario
+    path = os.path.join(tempfile.mkdtemp(), "ent.json")
+    original = enterprise_network()
+    export_scenario(original, path, firewall=FIREWALL,
+                    config={"max_steps": 40, "telemetry_latency": [1, 3]})
+    nodes, firewall, cfg = load_scenario(path)
+    assert set(nodes) == set(original)
+    assert cfg["telemetry_latency"] == (1, 3)
+    assert firewall == FIREWALL
+    for name, node in nodes.items():
+        o = original[name]
+        assert node.segment == o.segment and node.is_crown_jewel == o.is_crown_jewel
+        assert node.access == 0 and sorted(node.connections) == sorted(o.connections)
+        assert [v.technique_id for v in node.vulnerabilities] == \
+            [v.technique_id for v in o.vulnerabilities]
+    env = Environment(network=nodes, firewall=firewall, config={**cfg, "seed": 1})
+    report = Orchestrator(env, make_red("heuristic"), make_blue("soc"),
+                          SimConfig(verbose=False, show_report=False)).run()
+    assert report["winner"] in ("RED", "BLUE")
+
+
+def test_scenario_json_rejects_malformed():
+    import json, os, tempfile
+    from purple_sim.env.scenario_io import load_scenario
+    bad = {"nodes": [{"name": "a", "entry": True}, {"name": "b"}]}  # no crown jewel
+    path = os.path.join(tempfile.mkdtemp(), "bad.json")
+    with open(path, "w") as fh:
+        json.dump(bad, fh)
+    try:
+        load_scenario(path)
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "crown_jewel" in str(e)
+
+
 def test_archetype_scenarios_build_and_terminate():
     from purple_sim.env.scenario import SCENARIOS
     for scenario in SCENARIOS:

@@ -32,8 +32,33 @@ def _report_fallbacks(args, agents_turns) -> None:
             print(f"[llm] {label}: {fell_back}/{turns} turns fell back to the heuristic brain.")
 
 
+def _scenario_label(args) -> str:
+    import os
+    return os.path.basename(args.scenario_file) if getattr(args, "scenario_file", None) \
+        else args.scenario
+
+
 def _env(args, seed: int) -> Environment:
+    if getattr(args, "scenario_file", None):
+        nodes, firewall, cfg = _load_scenario_cached(args.scenario_file)
+        return Environment(network={n: _clone_node(v) for n, v in nodes.items()},
+                           firewall=firewall, config={**cfg, "seed": seed})
     return Environment(config={"seed": seed, "scenario": args.scenario})
+
+
+_scenario_cache: dict = {}
+
+
+def _load_scenario_cached(path: str):
+    if path not in _scenario_cache:
+        from .env.scenario_io import load_scenario
+        _scenario_cache[path] = load_scenario(path)
+    return _scenario_cache[path]
+
+
+def _clone_node(node):
+    import copy
+    return copy.deepcopy(node)  # each episode needs its own mutable node state
 
 
 _policy_cache: dict = {}
@@ -92,7 +117,7 @@ def _batch(args) -> None:
         else:
             blue_wins += 1
     n = args.episodes
-    print(f"\n=== BATCH: {n} episodes, {args.scenario} scenario "
+    print(f"\n=== BATCH: {n} episodes, {_scenario_label(args)} scenario "
           f"({args.red} Red vs {args.blue} Blue) ===")
     print(f"Red win rate:  {pct_ci(red_wins, n)}   (95% CI)")
     print(f"Blue win rate: {pct_ci(blue_wins, n)}")
@@ -127,7 +152,7 @@ def _analyze(args) -> None:
             flag = "  <-- blind spot" if ex >= 5 and det / ex < 0.25 else ""
             print(f"  {key:<20}{ex:>13}{det:>10}{det / ex * 100:>9.0f}%{flag}")
 
-    print(f"=== BLIND-SPOT MAP: {episodes} games on the {args.scenario} network "
+    print(f"=== BLIND-SPOT MAP: {episodes} games on the {_scenario_label(args)} network "
           f"({args.red} Red vs {args.blue} Blue) ===")
     print(f"Red win rate: {red_wins / episodes * 100:.0f}%")
     fmt(by_host, "By host - where attacks land without a response:", "host")
@@ -164,14 +189,18 @@ def main(argv=None) -> None:
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--scenario", default="default", choices=list(SCENARIOS),
                    help="'random' builds a different seeded network per episode.")
+    p.add_argument("--scenario-file",
+                   help="Path to a JSON network (see scenarios/enterprise.json); "
+                        "overrides --scenario. Model a real site here.")
     p.add_argument("--quiet", action="store_true", help="Suppress per-turn trace.")
     p.add_argument("--no-color", action="store_true")
     p.add_argument("--rl-demo", action="store_true", help="Run the Gym-style RL demo.")
     p.add_argument("--analyze", action="store_true",
                    help="Aggregate a per-host / per-technique blind-spot map over many games.")
     args = p.parse_args(argv)
-    if "rl" in (args.red, args.blue) and args.scenario != "default":
-        p.error("--red/--blue rl are trained on the default network; use --scenario default.")
+    if "rl" in (args.red, args.blue) and (args.scenario != "default" or args.scenario_file):
+        p.error("--red/--blue rl are trained on the default network; "
+                "don't combine them with --scenario or --scenario-file.")
 
     if args.rl_demo:
         _rl_demo(args)

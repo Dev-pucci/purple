@@ -1,0 +1,423 @@
+{
+  "config": {
+    "max_steps": 40,
+    "analyst_budget": 50,
+    "telemetry_latency": [
+      1,
+      3
+    ]
+  },
+  "firewall": {
+    "internet": [
+      "dmz"
+    ],
+    "dmz": [
+      "dmz",
+      "internal"
+    ],
+    "internal": [
+      "dmz",
+      "internal",
+      "secure"
+    ],
+    "secure": [
+      "internal",
+      "secure"
+    ]
+  },
+  "nodes": [
+    {
+      "name": "web_proxy",
+      "segment": "dmz",
+      "value": 1,
+      "services": [
+        "https"
+      ],
+      "connections": [
+        "app_server"
+      ],
+      "sensors": {
+        "NETWORK": 0.8,
+        "ENDPOINT": 0.6
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1190",
+          "name": "Exploit Public-Facing Application",
+          "cve": "CVE-ENT-01",
+          "success": 0.7,
+          "detection": 0.5,
+          "service": "https",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CRED-web_proxy",
+          "success": 0.3,
+          "detection": 0.3,
+          "service": "auth",
+          "grants": "USER",
+          "local": false,
+          "patchable": false
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-web_proxy",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ],
+      "entry": true
+    },
+    {
+      "name": "vpn_gateway",
+      "segment": "dmz",
+      "value": 1,
+      "services": [
+        "vpn"
+      ],
+      "connections": [
+        "jump_host"
+      ],
+      "sensors": {
+        "NETWORK": 0.7,
+        "ENDPOINT": 0.5
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1190",
+          "name": "Exploit Public-Facing Application",
+          "cve": "CVE-ENT-02",
+          "success": 0.6,
+          "detection": 0.5,
+          "service": "vpn",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CRED-vpn_gateway",
+          "success": 0.3,
+          "detection": 0.3,
+          "service": "auth",
+          "grants": "USER",
+          "local": false,
+          "patchable": false
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-vpn_gateway",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ],
+      "entry": true
+    },
+    {
+      "name": "app_server",
+      "segment": "internal",
+      "value": 2,
+      "services": [
+        "http",
+        "rpc"
+      ],
+      "connections": [
+        "web_proxy",
+        "jump_host",
+        "domain_controller",
+        "db_cluster"
+      ],
+      "sensors": {
+        "NETWORK": 0.7,
+        "ENDPOINT": 0.7
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-ENT-03",
+          "success": 0.6,
+          "detection": 0.5,
+          "service": "rpc",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-app_server",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "jump_host",
+      "segment": "internal",
+      "value": 2,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "connections": [
+        "vpn_gateway",
+        "app_server",
+        "file_server"
+      ],
+      "sensors": {
+        "NETWORK": 0.7,
+        "ENDPOINT": 0.6
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1021",
+          "name": "Remote Services",
+          "cve": "CVE-ENT-04",
+          "success": 0.55,
+          "detection": 0.5,
+          "service": "rdp",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-jump_host",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "domain_controller",
+      "segment": "internal",
+      "value": 4,
+      "services": [
+        "ldap",
+        "kerberos"
+      ],
+      "connections": [
+        "app_server",
+        "file_server",
+        "workstation_eng",
+        "workstation_hr"
+      ],
+      "sensors": {
+        "NETWORK": 0.8,
+        "ENDPOINT": 0.9
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-ENT-05",
+          "success": 0.5,
+          "detection": 0.6,
+          "service": "ldap",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-domain_controller",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "file_server",
+      "segment": "internal",
+      "value": 2,
+      "services": [
+        "smb"
+      ],
+      "connections": [
+        "jump_host",
+        "domain_controller",
+        "workstation_eng",
+        "workstation_hr"
+      ],
+      "sensors": {
+        "NETWORK": 0.6,
+        "ENDPOINT": 0.4
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-ENT-06",
+          "success": 0.6,
+          "detection": 0.45,
+          "service": "smb",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-file_server",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "workstation_eng",
+      "segment": "internal",
+      "value": 1,
+      "services": [
+        "smb",
+        "rdp"
+      ],
+      "connections": [
+        "domain_controller",
+        "file_server"
+      ],
+      "sensors": {
+        "NETWORK": 0.5,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CVE-ENT-07",
+          "success": 0.55,
+          "detection": 0.35,
+          "service": "rdp",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-workstation_eng",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "workstation_hr",
+      "segment": "internal",
+      "value": 1,
+      "services": [
+        "smb"
+      ],
+      "connections": [
+        "domain_controller",
+        "file_server"
+      ],
+      "sensors": {
+        "NETWORK": 0.5,
+        "ENDPOINT": 0.0
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1078",
+          "name": "Valid Accounts",
+          "cve": "CVE-ENT-08",
+          "success": 0.55,
+          "detection": 0.35,
+          "service": "smb",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-workstation_hr",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ]
+    },
+    {
+      "name": "db_cluster",
+      "segment": "secure",
+      "value": 5,
+      "services": [
+        "postgresql"
+      ],
+      "connections": [
+        "app_server"
+      ],
+      "sensors": {
+        "NETWORK": 0.8,
+        "ENDPOINT": 0.9
+      },
+      "vulnerabilities": [
+        {
+          "technique": "T1210",
+          "name": "Exploitation of Remote Services",
+          "cve": "CVE-ENT-09",
+          "success": 0.5,
+          "detection": 0.7,
+          "service": "postgresql",
+          "grants": "USER",
+          "local": false,
+          "patchable": true
+        },
+        {
+          "technique": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "cve": "PRIV-db_cluster",
+          "success": 0.8,
+          "detection": 0.5,
+          "service": "os",
+          "grants": "ADMIN",
+          "local": true,
+          "patchable": true
+        }
+      ],
+      "crown_jewel": true
+    }
+  ]
+}
