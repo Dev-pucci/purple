@@ -48,14 +48,18 @@ the single hottest host; `SOCBlue` weights alerts by recency and severity,
 correlates across neighbours, compensates for blind spots, and rations its
 analyst budget.
 
-| Defender | Red win % | mean coverage % |
-|---|---|---|
-| HeuristicBlue | 63 | 31 |
-| SOCBlue | **44** | 30 |
+| Defender | Red win % | Blue score | coverage % |
+|---|---|---|---|
+| HeuristicBlue | 63 | −17 | 31 |
+| SOCBlue | **54** | −38 | 29 |
 
 Swapping to a budget-disciplined analyst — no new sensors, no bigger budget —
-drops Red's win rate by a third. **Who is operating the controls dominates the
-result.** Any claim about "which control to buy" is downstream of this.
+drops Red's win rate without touching the architecture. **Who is operating the
+controls changes the result**, and any claim about "which control to buy" is
+downstream of this. Note the tension: on this 9-host site under the default
+analyst budget, `SOCBlue` wins more games but spends more doing it (a more
+negative Blue score from extra downtime/false positives) — a symptom of being
+under-resourced for the site's size, which Finding 2 picks apart.
 
 ## Finding 2 — the top lever depends on the defender
 
@@ -64,57 +68,53 @@ is mean coverage across the two (EDR-less) workstations.
 
 **HeuristicBlue (reacts to the hottest host, wastes budget on noise):**
 
-| Intervention | Red win % | coverage % | workstn % | T1078 % | file % |
-|---|---|---|---|---|---|
-| baseline | 63 | 31 | 2 | 3 | 24 |
-| + EDR on workstations | 68 | 30 | 2 | 2 | 25 |
-| + EDR on file_server | 66 | 31 | 1 | 2 | 33 |
-| faster logs (latency 1) | 59 | 31 | 5 | 5 | 21 |
-| **bigger SOC (budget 80)** | **44** | 36 | 3 | 5 | 29 |
-| everything combined | 14 | 41 | 28 | 33 | 43 |
+| Intervention | Red win % | coverage % | workstn % |
+|---|---|---|---|
+| baseline | 63 | 31 | 4 |
+| + EDR on workstations | 65 | 31 | 6 |
+| faster logs (latency 1) | 63 | 32 | 6 |
+| **bigger SOC (budget 80)** | **41** | 36 | 13 |
+| everything combined | 13 | 42 | 33 |
 
 **SOCBlue (recency/severity, correlation, budget-disciplined):**
 
-| Intervention | Red win % | coverage % | workstn % | T1078 % | file % |
-|---|---|---|---|---|---|
-| baseline | 44 | 30 | 5 | 7 | 14 |
-| + EDR on workstations | 45 | 31 | **18** | 13 | 17 |
-| + EDR on file_server | 45 | 30 | 6 | 9 | 21 |
-| **faster logs (latency 1)** | **7** | 39 | 10 | 15 | 27 |
-| bigger SOC (budget 80) | 44 | 30 | 5 | 7 | 14 |
-| everything combined | 7 | 43 | 24 | 25 | 42 |
+| Intervention | Red win % | coverage % | workstn % |
+|---|---|---|---|
+| baseline | 54 | 29 | 10 |
+| + EDR on workstations | 55 | 30 | **15** |
+| **faster logs (latency 1)** | **8** | 39 | 10 |
+| bigger SOC (budget 80) | 54 | 29 | 10 |
+| everything combined | 6 | 44 | 27 |
 
 For the weak defender the binding constraint is **analyst capacity** (it burns
-its budget chasing noise, so a bigger budget helps most: 63→44). For the
-competent defender a bigger budget does **nothing** (44→44) — it was never
-capacity-starved — and the decisive lever is **log latency**: cutting detection
-delay collapses Red's win rate from 44% to 7%. Same network, opposite advice,
+its budget chasing noise, so a bigger budget helps most: 63→41) while faster
+logs do nothing (63→63) — it can't act on the signal it already has. For the
+competent defender it is the mirror image: a bigger budget does **nothing**
+(54→54, never capacity-starved) and the decisive lever is **log latency**,
+which collapses Red's win rate from 54% to 8%. Same network, opposite advice,
 depending on how good your SOC already is.
 
 ## Finding 3 — sensors buy visibility, not necessarily outcomes
 
 Adding EDR to the blind workstations, with the competent defender, raised
-**workstation coverage from 5% to 18%** — it genuinely sees more. But the win
-rate didn't move (44→45), because those workstations aren't on the critical
+**workstation coverage from 10% to 15%** — it genuinely sees more. But the win
+rate didn't move (54→55), because those workstations aren't on the critical
 path to the crown jewel. Visibility where the attacker isn't going improves
 your coverage metric without improving the outcome. **Sensor placement relative
 to the attack path matters more than sensor count.**
 
 ## Finding 4 — the latency result holds against a *learned* attacker
 
-The findings above use the scripted Red. Re-running with a trained
-MaskablePPO Red (200 games, default network) confirms they aren't an artifact
-of a hand-coded attacker:
+The findings above use the scripted Red. Re-running with a trained MaskablePPO
+Red (200 games, default network) confirmed they aren't an artifact of a
+hand-coded attacker — against `SOCBlue`, faster logs took the *learned* Red's
+win rate from ~35% to ~6%, the same collapse as for the scripted Red, and the
+smart defender exploited the faster signal far better than the weak one.
 
-| Defender | slow logs (latency 1–3) | fast logs (latency 1) |
-|---|---|---|
-| HeuristicBlue | Red 35% | Red 16% |
-| SOCBlue | Red 35% | Red **6%** |
-
-Against a competent defender, cutting detection delay collapses even the
-learned attacker's win rate (35% → 6%), and the smart defender exploits the
-faster signal far better than the weak one (6% vs 16%). Detection *speed* is
-the robust high-leverage lever.
+> Measured on an earlier trained Red; the action set has since changed (stealth
+> variants were added), so that exact model no longer loads. Re-confirm after a
+> fresh `train_rl.py --side red` run. The scripted-Red result (Finding 2) is the
+> primary evidence; this was the cross-check.
 
 ## So what actually helps?
 
@@ -129,17 +129,17 @@ which one that is.
 
 ## Finding 5 — architecture matters as much as the defender
 
-The same competent defender (`SOCBlue`) on two postures (200 games each):
+The same competent defender (`SOCBlue`) on two postures (300 games each):
 
 | Network | Red win % |
 |---|---|
-| `enterprise` (segmented, EDR on key hosts) | 43 |
-| `flat` (one LAN, DB among the workstations, sparse EDR) | 86 |
+| `enterprise` (segmented, EDR on key hosts) | 54 |
+| `flat` (one LAN, DB among the workstations, sparse EDR) | 92 |
 
-Segmentation plus sensor coverage roughly halves the attacker's success — the
-same analyst, a very different outcome. Picking the archetype (`--scenario
-enterprise` vs `flat`) closest to a real site, then editing it, is the fastest
-way to see which structural weakness costs the most.
+Segmentation plus sensor coverage cuts the attacker's success from near-certain
+to a coin-flip — the same analyst, a very different outcome. Picking the
+archetype (`--scenario enterprise` vs `flat`) closest to a real site, then
+editing it, is the fastest way to see which structural weakness costs the most.
 
 ## Caveats (read these)
 

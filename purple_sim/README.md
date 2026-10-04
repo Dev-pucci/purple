@@ -20,19 +20,23 @@ technique IDs as shared vocabulary.
 
 What the model says so far (details and caveats in [`ANALYSIS.md`](ANALYSIS.md)):
 
-- **Who runs the controls matters most.** Swapping the naive defender for a
-  budget-disciplined one (`--blue soc`) cuts the attacker's win rate by a third
-  on the same network, before buying anything.
+- **Who runs the controls matters.** Swapping the naive defender for a
+  budget-disciplined one (`--blue soc`) drops the attacker's win rate on the
+  same network before buying anything.
 - **For a competent defender, detection *speed* beats more sensors or
-  analysts.** Halving log latency collapses the attacker (44% → 7% win rate);
-  a bigger analyst budget does nothing. Holds against a *trained* attacker too.
+  analysts.** Halving log latency collapses the attacker (54% → 8% win rate);
+  a bigger analyst budget does nothing. (The weak defender is the mirror image:
+  budget is its bottleneck, speed does nothing.)
 - **Sensors buy visibility, not outcomes, off the attack path.** Adding EDR to
-  blind hosts raised their coverage 5% → 18% but didn't change who won.
-- **Architecture is a top-tier control.** The same defender survives 43% on a
-  segmented network vs 14% on a flat one.
-- **RL honesty checks.** A learned attacker plateaus level with the scripted
-  kill chain (the chain is near-forced); a learned defender first *reward-hacked*
-  into scorched-earth denial until trained against an availability-priced score.
+  blind hosts raised their coverage but didn't change who won.
+- **Architecture is a top-tier control.** The same defender holds the attacker
+  to a coin-flip on a segmented network but loses ~92% of the time on a flat one.
+- **RL as a model auditor.** A learned attacker plateaus level with the scripted
+  kill chain (it's near-forced); a learned defender first *reward-hacked* into
+  scorched-earth denial, then — once trained against an availability-priced
+  score and after a single-point-of-failure in the escalation model was closed —
+  became the strongest defender (beats both scripted baselines on win rate *and*
+  score). Finding the two flaws was the point.
 
 ## Quick start (zero dependencies)
 
@@ -126,6 +130,13 @@ ceiling for this environment — RL matching it is the expected result, not a
 training failure. More headroom would need a richer action space (timing,
 stealth choices, decoys) rather than more compute. `train_rl.py` prints the
 table so you can see where your run landed.
+
+A learned **Blue** (`train_rl.py --side blue`, 500k steps) is a different story:
+after the reward was fixed to the honest Blue score and a single-point-of-failure
+in the escalation model was closed (see `ANALYSIS.md`), it reaches ~65% wins
+with a Blue score of ~+77 — beating both scripted defenders on win rate *and*
+on availability-priced score, with comparable coverage. Play it with
+`--blue rl --rl-blue-model models/ppo_blue.zip`.
 
 ## How a turn works
 
