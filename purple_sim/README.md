@@ -232,6 +232,11 @@ Four scenarios, all in `env/scenario.py`:
   with the database among the workstations, sparse monitoring. A deliberately
   weaker posture; compare it with `enterprise` to see what segmentation buys
   (`ANALYSIS.md`, Finding 5).
+- `webapp` — an abstract web application by trust layer: WAF-watched web tier →
+  API (broken access control, SSRF) → identity/OAuth → data store, with
+  OWASP-mapped weaknesses. An *approximation* of web-app security in the same
+  engine (no real requests or payloads); useful for the same coverage analysis.
+  Note it has its own firewall policy for the web layers.
 
 Pick the archetype closest to a real site and edit it to model that site; the
 model needs only shapes and sensor coverage, no secrets.

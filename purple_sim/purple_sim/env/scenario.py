@@ -299,8 +299,80 @@ def flat_network() -> Dict[str, Node]:
     return {n.name: n for n in nodes}
 
 
-SCENARIOS = ("default", "random", "enterprise", "flat")
-_BUILDERS = {"default": default_network, "enterprise": enterprise_network, "flat": flat_network}
+# ------------------------------------------------------- web-application scenario
+# Firewall for the web stack's trust layers (distinct from the network FIREWALL).
+WEBAPP_FIREWALL: Dict[str, set] = {
+    "internet": {"web"},
+    "web": {"web", "app"},
+    "app": {"app", "secure"},
+    "secure": {"secure", "app"},
+}
+
+
+def webapp_network() -> Dict[str, Node]:
+    """An abstract web application's attack surface by trust layer. This is an
+    *approximation* of web-app security inside a graph engine: the layers and
+    OWASP-flavoured weaknesses are real concepts, but there are no real requests
+    or payloads. Shape:
+
+        internet -> [web_app : web]  (WAF-watched, A03 injection / web shell)
+                        |
+                    [api_service : app]  (A01 broken access control, A10 SSRF)
+                        |   \\
+        [auth_service : app, identity]   [user_db : secure]* (* crown jewel data)
+
+    The WAF gives web_app strong NETWORK detection; the data store is in a
+    `secure` segment, so reaching it needs ADMIN (a stolen session/token) on the
+    pivot — the web analogue of "own the app, then forge your way to the data".
+    """
+    def vuln(tech, name, cve, succ, det, service, grants=AccessLevel.USER, local=False):
+        return Vulnerability(tech, name, cve, succ, det, service=service,
+                             grants=grants, local=local)
+
+    return {
+        "web_app": Node(
+            name="web_app", segment="web", is_entry=True, value=1,
+            services=["https"], connections=["api_service"],
+            sensors={Sensor.NETWORK: 0.85, Sensor.ENDPOINT: 0.5},  # WAF + app logs
+            vulnerabilities=[
+                vuln("T1190", "A03 Injection (SQLi/RCE)", "WEB-A03", 0.6, 0.6, "https"),
+                vuln("T1505.003", "A08 Web Shell upload", "WEB-A08", 0.4, 0.5, "https",
+                     local=True, grants=AccessLevel.ADMIN),
+            ]),
+        "api_service": Node(
+            name="api_service", segment="app", value=2,
+            services=["http-api"], connections=["web_app", "auth_service", "user_db"],
+            sensors={Sensor.NETWORK: 0.5, Sensor.ENDPOINT: 0.6},
+            vulnerabilities=[
+                vuln("T1078", "A01 Broken Access Control", "WEB-A01", 0.6, 0.45, "http-api"),
+                vuln("T1090", "A10 SSRF pivot", "WEB-A10", 0.5, 0.4, "http-api",
+                     local=True, grants=AccessLevel.ADMIN),
+            ]),
+        "auth_service": Node(
+            name="auth_service", segment="app", is_identity=True, value=4,
+            services=["oauth"], connections=["api_service", "user_db"],
+            sensors={Sensor.NETWORK: 0.6, Sensor.ENDPOINT: 0.7},
+            vulnerabilities=[
+                vuln("T1078", "A07 Auth failure (token/session theft)", "WEB-A07",
+                     0.5, 0.5, "oauth"),
+                _privesc("WEB-A07P"),
+            ]),
+        "user_db": Node(
+            name="user_db", segment="secure", is_crown_jewel=True, value=5,
+            services=["postgresql"], connections=["api_service", "auth_service"],
+            sensors={Sensor.NETWORK: 0.7, Sensor.ENDPOINT: 0.85},
+            vulnerabilities=[
+                vuln("T1213", "A01 Direct object access to records", "WEB-DB", 0.5, 0.7,
+                     "postgresql"),
+                _privesc("WEB-DBP"),
+            ]),
+    }
+
+
+SCENARIOS = ("default", "random", "enterprise", "flat", "webapp")
+_BUILDERS = {"default": default_network, "enterprise": enterprise_network,
+             "flat": flat_network, "webapp": webapp_network}
+_FIREWALLS = {"webapp": WEBAPP_FIREWALL}  # others fall back to the network FIREWALL
 
 
 def make_network(scenario: str, seed: int) -> Dict[str, Node]:
@@ -309,6 +381,11 @@ def make_network(scenario: str, seed: int) -> Dict[str, Node]:
     if scenario in _BUILDERS:
         return _BUILDERS[scenario]()
     raise ValueError(f"Unknown scenario {scenario!r} (use one of {', '.join(SCENARIOS)})")
+
+
+def scenario_firewall(scenario: str) -> Dict[str, set]:
+    """The firewall policy a built-in scenario uses (web layers differ from LAN zones)."""
+    return _FIREWALLS.get(scenario, FIREWALL)
 
 
 DEFAULT_CONFIG = {

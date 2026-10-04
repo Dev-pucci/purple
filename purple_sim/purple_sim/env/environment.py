@@ -43,7 +43,7 @@ from typing import Callable, Dict, List, Optional, Union
 
 from .models import (Action, AccessLevel, BlueActionType, EVENT_SENSOR, EventKind,
                      Faction, Node, RedActionType, TelemetryEvent)
-from .scenario import ADMIN_SEGMENTS, DEFAULT_CONFIG, FIREWALL, make_network
+from .scenario import ADMIN_SEGMENTS, DEFAULT_CONFIG, make_network, scenario_firewall
 from .telemetry import TelemetryBus
 
 BlueInput = Union[Action, Callable[[dict], Action]]
@@ -87,9 +87,10 @@ class Environment:
         self.config = {**DEFAULT_CONFIG, **(config or {})}
         seed = self.config["seed"]
         self.nodes: Dict[str, Node] = network or make_network(self.config["scenario"], seed)
-        # A custom network with no firewall given gets an allow-all policy (None).
+        # A custom network with no firewall given gets an allow-all policy (None);
+        # a built-in scenario uses its own firewall (web layers != LAN zones).
         self.firewall = firewall if firewall is not None else (
-            FIREWALL if network is None else None)
+            scenario_firewall(self.config["scenario"]) if network is None else None)
         self.rng = random.Random(f"{seed}:red")
         self.bus = TelemetryBus(
             rng=random.Random(f"{seed}:telemetry"),

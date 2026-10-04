@@ -17,9 +17,9 @@ _BLUE, _RED, _MUTED = "#2563eb", "#dc2626", "#94a3b8"
 
 def _bar(frac: float, color: str, label: str) -> str:
     pct = max(0.0, min(1.0, frac)) * 100
-    return (f'<div class="bar"><div class="fill" style="width:{pct:.1f}%;'
-            f'background:{color}"></div><span class="barlabel">{html.escape(label)}'
-            f'</span></div>')
+    return (f'<div class="barwrap"><div class="bar"><div class="fill" '
+            f'style="width:{pct:.1f}%;background:{color}"></div></div>'
+            f'<span class="val">{html.escape(label)}</span></div>')
 
 
 def _defender_table(rows: Sequence[dict]) -> str:
@@ -70,10 +70,14 @@ def _inner(title: str, scenario: str, defenders: Sequence[dict],
     findings_html = "".join(f"<li>{html.escape(f)}</li>" for f in findings)
     return f"""<title>{html.escape(title)}</title>
 <style>
-  :root {{ color-scheme: light dark;
-    --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; }}
-  @media (prefers-color-scheme: dark) {{ :root {{
-    --bg:#0b1120; --card:#111827; --ink:#e5e7eb; --muted:#94a3b8; --line:#1f2937; }} }}
+  :root {{ color-scheme: light;
+    --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --track:#e2e8f0; }}
+  @media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{
+    --bg:#0b1120; --card:#111827; --ink:#e5e7eb; --muted:#94a3b8; --line:#1f2937;
+    --track:#1f2937; color-scheme:dark; }} }}
+  :root[data-theme="dark"] {{
+    --bg:#0b1120; --card:#111827; --ink:#e5e7eb; --muted:#94a3b8; --line:#1f2937;
+    --track:#1f2937; color-scheme:dark; }}
   * {{ box-sizing:border-box; }}
   body {{ margin:0; background:var(--bg); color:var(--ink);
     font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }}
@@ -90,11 +94,12 @@ def _inner(title: str, scenario: str, defenders: Sequence[dict],
   th {{ color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase;
     letter-spacing:.03em; }}
   td.name {{ font-weight:600; white-space:nowrap; }} td.num {{ font-variant-numeric:tabular-nums; }}
-  .bar {{ position:relative; background:var(--line); border-radius:6px; height:22px;
-    min-width:120px; overflow:hidden; }}
-  .fill {{ position:absolute; inset:0 auto 0 0; border-radius:6px; }}
-  .barlabel {{ position:relative; z-index:1; font-size:12px; font-weight:600;
-    padding:0 8px; line-height:22px; color:#fff; mix-blend-mode:difference; }}
+  .barwrap {{ display:flex; align-items:center; gap:10px; min-width:0; }}
+  .bar {{ flex:1; min-width:70px; background:var(--track); border-radius:6px; height:10px;
+    overflow:hidden; }}
+  .fill {{ height:100%; border-radius:6px; }}
+  .val {{ font-size:13px; font-weight:600; font-variant-numeric:tabular-nums;
+    color:var(--ink); white-space:nowrap; }}
   .flag {{ font-size:11px; color:#fff; background:var(--muted); border-radius:4px;
     padding:1px 6px; margin-left:6px; }}
   ul.findings {{ margin:0; padding-left:20px; }} ul.findings li {{ margin:6px 0; }}
