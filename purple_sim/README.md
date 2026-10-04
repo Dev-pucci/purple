@@ -146,6 +146,25 @@ with a Blue score of ~+77 — beating both scripted defenders on win rate *and*
 on availability-priced score, with comparable coverage. Play it with
 `--blue rl --rl-blue-model models/ppo_blue.zip`.
 
+## Web security
+
+Two web-security pieces sit alongside the network sim:
+
+- **`webapp` scenario** (above) — the attack-path model for a web app's trust
+  layers, analysed exactly like the network scenarios.
+- **`webcheck`** — a standalone, offline analyzer for HTTP response headers and
+  cookies. It makes no network connections; you feed it headers you already
+  have, and it flags missing/weak controls (HSTS, CSP, `nosniff`, framing,
+  cookie `Secure`/`HttpOnly`/`SameSite`, info disclosure) with fixes:
+
+  ```bash
+  curl -sI https://your-site.example | python -m purple_sim.webcheck
+  python -m purple_sim.webcheck --file saved_headers.txt --json
+  ```
+
+  It's a hygiene checklist, not a scanner: a clean report means the common
+  headers are sane, not that the app is secure.
+
 ## How a turn works
 
 ```
@@ -343,6 +362,7 @@ purple_sim/
       rl_interface.py        # zero-dep Gym-style env, PolicyRed, RL stub
       gym_env.py             # gymnasium adapter + loading a trained policy
     report.py                # render results as a shareable self-contained HTML page
+    webcheck.py              # defensive HTTP security-header / cookie analyzer (offline)
     scoring/
       scorer.py              # Red/Blue scores + Purple coverage report
     orchestrator.py          # turn loop + trace + report printing

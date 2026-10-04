@@ -29,6 +29,7 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 purple-sim = "purple_sim.cli:main"
+purple-webcheck = "purple_sim.webcheck:main"
 
 [project.urls]
 Repository = "https://github.com/Dev-pucci/purple"

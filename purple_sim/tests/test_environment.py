@@ -54,6 +54,32 @@ def attack_events(env):
 
 
 # ----------------------------------------------------------------- basics
+def test_webcheck_flags_missing_and_weak_controls():
+    from purple_sim.webcheck import analyze, parse_headers
+    raw = ("HTTP/2 200\r\n"
+           "server: nginx/1.21.0\r\n"
+           "content-type: text/html\r\n"
+           "set-cookie: sid=abc; Path=/\r\n")       # no Secure/HttpOnly/SameSite
+    findings = analyze(parse_headers(raw))
+    headers_flagged = {f.header for f in findings}
+    assert "Strict-Transport-Security" in headers_flagged   # missing HSTS (high)
+    assert "Content-Security-Policy" in headers_flagged      # missing CSP
+    assert "Set-Cookie" in headers_flagged                   # insecure cookie
+    assert any(f.severity == "high" for f in findings)
+    assert findings == sorted(findings, key=lambda f: {"high": 0, "medium": 1,
+                                                        "low": 2, "info": 3}[f.severity])
+    # A well-configured response yields no cookie/HSTS/CSP findings.
+    good = parse_headers(
+        "strict-transport-security: max-age=31536000; includeSubDomains\n"
+        "content-security-policy: default-src 'self'\n"
+        "x-content-type-options: nosniff\n"
+        "x-frame-options: DENY\n"
+        "referrer-policy: strict-origin-when-cross-origin\n"
+        "permissions-policy: geolocation=()\n"
+        "set-cookie: sid=abc; Secure; HttpOnly; SameSite=Lax\n")
+    assert analyze(good) == []
+
+
 def test_html_report_builds_both_forms():
     from purple_sim.report import build_report
     defs = [{"name": "soc", "red_win": 40.0, "red_win_label": "40% [34, 46]",
