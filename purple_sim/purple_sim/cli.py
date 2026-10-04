@@ -7,6 +7,7 @@ Examples
   python -m purple_sim.cli --red llm --live        # real Claude Red (needs API key)
   python -m purple_sim.cli --episodes 20 --quiet   # batch run, averaged coverage
   python -m purple_sim.cli --rl-demo               # random RL agent on the gym env
+  python -m purple_sim.cli --red rl --rl-model models/ppo_red.zip  # trained PPO Red
 """
 from __future__ import annotations
 
@@ -34,9 +35,21 @@ def _env(args, seed: int) -> Environment:
     return Environment(config={"seed": seed, "scenario": args.scenario})
 
 
+_policy_cache: dict = {}
+
+
+def _make_red(args):
+    if args.red != "rl":
+        return make_red(args.red, mock=not args.live)
+    if args.rl_model not in _policy_cache:  # load the model once per run
+        from .agents.gym_env import load_policy_red  # needs gymnasium + stable-baselines3
+        _policy_cache[args.rl_model] = load_policy_red(args.rl_model)
+    return _policy_cache[args.rl_model]
+
+
 def _single(args) -> dict:
     env = _env(args, args.seed)
-    red = make_red(args.red, mock=not args.live)
+    red = _make_red(args)
     blue = make_blue(args.blue, mock=not args.live)
     orch = Orchestrator(env, red, blue,
                         SimConfig(verbose=not args.quiet, color=not args.no_color,
@@ -52,7 +65,7 @@ def _batch(args) -> None:
     reds, blues, turns = [], [], 0
     for i in range(args.episodes):
         env = _env(args, args.seed + i)
-        red = make_red(args.red, mock=not args.live)
+        red = _make_red(args)
         blue = make_blue(args.blue, mock=not args.live)
         report = Orchestrator(env, red, blue,
                               SimConfig(verbose=False, show_report=False)).run()
@@ -95,7 +108,9 @@ def _rl_demo(args) -> None:
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="Purple Team Red-vs-Blue simulation.")
-    p.add_argument("--red", default="heuristic", choices=["heuristic", "llm"])
+    p.add_argument("--red", default="heuristic", choices=["heuristic", "llm", "rl"])
+    p.add_argument("--rl-model", default="models/ppo_red.zip",
+                   help="Trained PPO model for --red rl (see train_rl.py).")
     p.add_argument("--blue", default="heuristic", choices=["heuristic", "llm"])
     p.add_argument("--live", action="store_true",
                    help="Use the real Claude API for LLM agents (needs ANTHROPIC_API_KEY).")
@@ -107,6 +122,8 @@ def main(argv=None) -> None:
     p.add_argument("--no-color", action="store_true")
     p.add_argument("--rl-demo", action="store_true", help="Run the Gym-style RL demo.")
     args = p.parse_args(argv)
+    if args.red == "rl" and args.scenario != "default":
+        p.error("--red rl is trained on the default network; use --scenario default.")
 
     if args.rl_demo:
         _rl_demo(args)

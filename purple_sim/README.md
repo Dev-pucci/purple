@@ -38,7 +38,7 @@ environment, so you can mix and match.
 |---|---|---|
 | **Heuristic** | `agents/heuristic.py` | nothing — deterministic baselines |
 | **LLM** | `agents/llm_agents.py` | nothing in *mock* mode; `anthropic` + API key for *live* |
-| **RL** | `agents/rl_interface.py` | nothing for the stub; `gymnasium`+`stable-baselines3` to train |
+| **RL** | `agents/rl_interface.py`, `agents/gym_env.py`, `train_rl.py` | nothing for the stub; `gymnasium` + `stable-baselines3` + `sb3-contrib` to train |
 
 ### LLM agents
 
@@ -55,16 +55,49 @@ move — so the full pipeline (orchestrator, scoring, logging) runs unchanged
 whether or not a key is present. Live mode forces the model to return a
 structured action via tool-calling, not free text.
 
+The system prompts explain the game's rules and costs, each turn's prompt
+includes that side's own recent moves, and telemetry in the prompt is capped to
+the most recent 40 events. Live mode uses `claude-opus-4-8`. Moving to
+`claude-opus-5-5` means replacing the forced `tool_choice` (which that model
+rejects) with `tool_choice: auto` plus `strict: true` on the tools.
+
 ### RL interface
 
 ```bash
 python run.py --rl-demo    # random Red agent on the Gym-style env + training notes
+
+pip install gymnasium stable-baselines3 sb3-contrib
+python train_rl.py                                    # train PPO Red, compare with baselines
+python run.py --red rl --rl-model models/ppo_red.zip  # watch the trained agent play
 ```
 
 `PurpleRedEnv` mirrors the `reset()/step()` contract with a flat numeric
 observation and a discrete action table, deliberately **without** depending on
-gymnasium so the repo stays zero-dep. To train for real, see `train_notes()` —
-making it subclass `gymnasium.Env` is a few lines, then PPO drops straight in.
+gymnasium so the core stays zero-dep. `agents/gym_env.py` wraps it as a real
+`gymnasium.Env`, and `PolicyRed` plays any trained policy as a normal Red
+agent in the orchestrator.
+
+- **Every episode is a new game.** Each reset draws a fresh seed, so the
+  learner can't memorise one run.
+- **Reward:** the change in Red's position each step (footholds weighted by
+  value, partial credit for exfiltration progress, +100 for the steal, negative
+  when evicted), +0.2 per foothold Blue hasn't seen yet, and −0.1 for a move
+  that didn't reach the network. Stealth is deliberately small. An earlier
+  version paid +1 per hidden foothold per turn, and PPO learned to sit on
+  footholds farming it instead of ever stealing the data.
+- **Observation:** per node — discovered, reachable, held, access level,
+  isolated, scanned, has known vulns, can escalate, is the crown jewel, and how
+  far exfiltration has got.
+- **Action masking:** each turn the learner is told which moves can do
+  anything, worked out from Red's own view so it reveals nothing new. Training
+  uses MaskablePPO from `sb3-contrib`. Without masking, plain PPO never found
+  the multi-step chain (scan → exploit → escalate → pivot → exfil).
+- **Default network only.** The observation and action table are built from a
+  fixed node set, so RL uses the default scenario.
+
+Reference result (`train_rl.py`, 500k steps on CPU, 300 held-out games vs the
+heuristic Blue): see the table the script prints — MaskablePPO Red is trained to
+beat the heuristic-Red win rate.
 
 ## How a turn works
 
@@ -77,48 +110,82 @@ Red picks + resolves its action  ->  emit telemetry (maybe; maybe delayed)
                                  ->  check termination
 ```
 
-Red wins by exfiltrating the crown jewel; Blue wins by surviving to `max_steps`.
+Red wins by exfiltrating the crown jewel; Blue wins by surviving to `max_steps`
+without that happening.
+
+### The attack chain
+
+Access on a host is **NONE < USER < ADMIN**. Red works a kill chain:
+
+1. **SCAN** a reachable node — reveals its remote vulnerabilities, whether it
+   has a local privilege-escalation path, and its neighbours. You can't EXPLOIT
+   what you haven't scanned.
+2. **EXPLOIT** a known remote vuln for a foothold (usually USER).
+3. **ESCALATE** USER → ADMIN using a local privesc path. ADMIN is needed to
+   cross into a secure segment and to exfiltrate.
+4. **LATERAL_MOVE** from a foothold to an adjacent node (`lateral_from` lists
+   the sources that can legally reach a node now).
+5. **EXFILTRATE** from the crown jewel at ADMIN, for `exfil_steps` turns; a
+   re-image wipes the progress.
 
 ### Movement rules
 
-- **Red needs a route.** It can only scan or exploit the internet-facing entry
-  node, a node it already holds, or a neighbour of a foothold it holds that
-  isn't isolated. Knowing a node exists is not enough.
-- **LATERAL_MOVE is a credentialed pivot** (T1021): it can take over a
-  neighbour even when the neighbour is patched, but it succeeds less often
-  (`lateral_success`).
-- **Isolation cuts a node off.** Red can't scan, exploit or pivot into it, and
-  a foothold on it can't be pivoted from or exfiltrated from.
-- **RESTORE re-images.** It evicts Red at once. The node is then offline for
-  `restore_duration` Red turns and comes back clean and un-isolated.
-- **PATCH needs a maintenance window.** It closes the node's patchable
-  vulnerabilities but takes it offline for `patch_duration` Red turns. Stolen
-  credentials (T1078 on every entry node) can't be patched, so Blue can slow
-  Red's way in but never lock it out for good.
-- **Exfiltration takes time.** Red has to EXFILTRATE from the crown jewel for
-  `exfil_steps` turns, and a re-image wipes its progress. That window is
-  Blue's last chance.
+- **Red needs a route.** It can only act on the internet-facing entry node, a
+  node it holds, or a neighbour of a non-isolated foothold — and only where the
+  **firewall** permits that segment hop.
+- **Segments + firewall.** Hosts live in zones (`dmz`, `internal`, `secure`).
+  Traffic is allowed only between the segment pairs in `FIREWALL`. Crossing into
+  an `ADMIN_SEGMENT` (the `secure` zone) requires **ADMIN** on the pivot host —
+  so reaching the crown jewel forces an ESCALATE, not just a lucky path.
+- **Isolation cuts a node off.** Red can't scan, exploit, escalate on, or pivot
+  into/out of it.
+- **RESTORE re-images.** Evicts Red at once; the node is offline for
+  `restore_duration` turns, then returns clean and un-isolated.
+- **PATCH needs a maintenance window.** Closes patchable vulns but takes the
+  node offline for `patch_duration` turns. Stolen credentials (T1078 on every
+  entry node) and the firewall can't be patched away, so Blue can slow Red's way
+  in but never lock it out for good.
 - Isolating an already-isolated node, patching a patched one, or restoring one
   that's already re-imaging is a no-op.
+
+### Detection: sensors, blind spots, retention
+
+Every attack action would be picked up by one sensor — **NETWORK** (scans,
+lateral movement) or **ENDPOINT** (exploitation, privesc, exfil). Each host has
+a coverage level per sensor; the chance an action is logged is its base
+detection × that coverage, plus any INVESTIGATE monitoring (which works even
+where a sensor is **absent** — a zero-coverage host is a blind spot, e.g. the
+default `workstation` has no EDR). Blue only acts on events inside a
+`log_retention` window; older ones scroll off its working view (but stay in the
+record the Purple report is scored against).
+
+### Defender budget
+
+Blue has a finite pool of **analyst action-points** (`analyst_budget`) for the
+whole game. INVESTIGATE/PATCH/ISOLATE/RESTORE each cost points; once the pool is
+empty Blue can only MONITOR. False positives and needless containment burn the
+budget, so a trigger-happy Blue runs dry before the real intrusion lands.
 
 ### Scenarios
 
 `--scenario default` is the hand-built 4-node network in `env/scenario.py`.
 `--scenario random` generates a different network per seed: 1–2 entry nodes,
 3–6 internal hosts with cross-links (so there's usually more than one route),
-and the crown jewel behind 1–2 internal hosts, never directly on the DMZ.
+per-host sensor coverage (some with blind spots), and the crown jewel in the
+`secure` segment behind 1–2 internal hosts, never directly on the DMZ.
 
 ## Why the design choices matter
 
 - **Ground truth is private.** `Environment.blue_view()` never exposes a node's
   `compromised` flag or an event's `is_true_positive` label (there's a test for
   this). Blue infers from telemetry alone.
-- **Telemetry is noisy and delayed.** Each real attack action is logged only with
-  some probability (a blind spot if missed), appears 1–3 steps later, and is
-  mixed with benign false positives. Some of that noise *looks* like an attack
-  (admin scans, failed logins, legit remote sessions), with the same event kind
-  and technique as the real thing, so Blue can't filter it out by type. This is
-  what makes the defender's job real.
+- **Telemetry is noisy, delayed and patchy.** A real attack action is logged
+  only with some probability (set by the host's sensor coverage — zero is a
+  blind spot), appears 1–3 steps later, scrolls off after `log_retention`
+  steps, and is mixed with benign false positives. Some of that noise *looks*
+  like an attack (admin scans, failed logins, legit remote sessions), with the
+  same event kind and technique as the real thing, so Blue can't filter it out
+  by type. This is what makes the defender's job real.
 - **Each side sees its own recent moves.** Both views include the last few
   actions that side took. Red sees its results, but not whether they were
   logged. Blue sees only what it did, never whether a node really was
@@ -126,13 +193,13 @@ and the crown jewel behind 1–2 internal hosts, never directly on the DMZ.
 - **Fair comparisons.** Red's action outcomes, telemetry and noise each draw
   from their own random stream, so two agents run on the same seed face the
   same luck wherever their choices coincide.
-- **Containment has a cost.** A containment (isolate/restore) is a true
-  positive only if the node was compromised *at the moment Blue acted*.
-  Containing a healthy node is a false positive, and every node-step spent
-  isolated or re-imaging costs downtime. Blue can't just nuke everything, and
-  it can't farm points by re-imaging the same node over and over.
+- **Containment has a cost, and attention is finite.** A containment
+  (isolate/restore) is a true positive only if the node was compromised *at the
+  moment Blue acted*. Containing a healthy node is a false positive; every
+  node-step offline costs downtime; and every active move spends from a fixed
+  analyst-point budget. Blue can't just nuke everything or chase every alert.
 - **Coverage is correlated honestly.** `coverage_pct` = of the attack steps Red
-  executed (exploit, lateral move, exfiltrate), how many produced a genuine
+  executed (exploit, escalate, lateral move, exfiltrate), how many produced a genuine
   telemetry event that Blue then *responded to* on that host (isolate or
   restore, or patch while the host is still clean; investigate is triage, not a
   response). The response must come at
@@ -150,19 +217,23 @@ Edit `env/scenario.py` (`DEFAULT_CONFIG`) or pass a config dict to `Environment`
 |---|---|
 | `scenario` | `"default"` or `"random"` network |
 | `telemetry_latency` | how many steps before Blue sees an event |
-| `noise_per_step` | false-positive volume |
-| `lookalike_prob` | share of noise that looks like an attack |
+| `noise_per_step` / `lookalike_prob` | false-positive volume / share that looks like an attack |
+| `log_retention` | steps an event stays in Blue's working view (0 = forever) |
 | `investigate_boost` | how much INVESTIGATE sharpens future detection |
 | `restore_duration` / `patch_duration` | Red turns a node stays offline while re-imaging / patching |
-| `lateral_success` / `lateral_detection` | odds a credentialed pivot works / is logged |
+| `escalate_detection` | odds an ESCALATE is logged |
+| `lateral_success` / `lateral_detection` | odds a pivot works / is logged |
 | `exfil_steps` / `exfil_detection` | EXFILTRATE turns needed / odds each one is logged |
+| `analyst_budget` + `analyst_costs` | Blue's total action-points and per-action cost |
 | `max_steps` | game length / Red's time budget |
 
-Out of the box, heuristic vs heuristic is roughly even. Over 300 games, Red wins
-about 46% on the default network and 41% on random ones, and mean coverage is
-around 50%. The defaults were tuned for that, so a new agent's win rate against
-either baseline means something. The biggest levers are `exfil_steps`
-(Blue's window), `telemetry_latency`, and Blue's `CONTAIN_AT` in
+Out of the box, heuristic vs heuristic is roughly even on the default network
+(over 300 games, Red wins ~45%, mean coverage ~36%). Random networks are harder
+for the defender — more hosts, more blind spots, longer paths — so Red wins
+~63% there; that gap is a finding, not a bug. The defaults were tuned for the
+default network, so a new agent's win rate against either baseline means
+something. The biggest levers are `analyst_budget` (how much Blue can do),
+`exfil_steps` (Blue's window), `log_retention`, and Blue's `CONTAIN_AT` in
 `agents/heuristic.py`.
 
 ## Layout
@@ -170,9 +241,10 @@ either baseline means something. The biggest levers are `exfil_steps`
 ```
 purple_sim/
   run.py                     # launcher: python run.py
+  train_rl.py                # train + evaluate a MaskablePPO Red (needs gymnasium + SB3 + sb3-contrib)
   purple_sim/
     env/
-      models.py              # Node, Vulnerability, Action, TelemetryEvent
+      models.py              # Node, Vulnerability, Action, TelemetryEvent, AccessLevel, Sensor
       attack_catalog.py      # MITRE ATT&CK technique labels
       scenario.py            # default + random networks, config
       telemetry.py           # noisy/delayed Blue feed
@@ -181,7 +253,8 @@ purple_sim/
       base.py                # RedAgent / BlueAgent interfaces
       heuristic.py           # deterministic baselines
       llm_agents.py          # mock + live Claude agents (tool-calling)
-      rl_interface.py        # Gym-style env + RL stub + training notes
+      rl_interface.py        # zero-dep Gym-style env, PolicyRed, RL stub
+      gym_env.py             # gymnasium adapter + loading a trained policy
     scoring/
       scorer.py              # Red/Blue scores + Purple coverage report
     orchestrator.py          # turn loop + trace + report printing
@@ -194,6 +267,7 @@ purple_sim/
 
 - Add more techniques/nodes in `scenario.py` and `attack_catalog.py`.
 - Flip LLM agents to `--live` and compare their coverage against the heuristics.
-- Train an RL Red (then an RL Blue) and run self-play.
+- Train an RL Blue against the PPO Red and alternate (self-play).
+- Make RL work on random networks (a fixed-size, role-indexed node encoding).
 - Add an LLM-as-judge pass that scores the trace for Red stealth and Blue
   time-to-detect.

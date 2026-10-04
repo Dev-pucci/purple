@@ -2,6 +2,7 @@
 #
 # Optional extras, only if you want them:
 #   anthropic>=0.39        # for --live LLM agents (real Claude via tool-calling)
-#   gymnasium>=0.29         # to make PurpleRedEnv a true gym.Env
-#   stable-baselines3>=2.0  # to train RL agents (PPO etc.)
+#   gymnasium>=1.0          # agents/gym_env.py (PurpleRedEnv as a gymnasium.Env)
+#   stable-baselines3>=2.4  # train_rl.py and --red rl
+#   sb3-contrib>=2.4        # MaskablePPO (valid-move masking) for train_rl.py
 #   pytest>=7.0             # nicer test runner (tests also run as a plain script)

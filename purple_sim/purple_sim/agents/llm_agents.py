@@ -26,18 +26,58 @@ from .heuristic import HeuristicBlue, HeuristicRed
 
 DEFAULT_MODEL = "claude-opus-4-8"
 
+MAX_TELEMETRY_IN_PROMPT = 40  # most recent events shown to the model
+
 RED_SYSTEM = """You are an autonomous Red Team agent in a *simulated*, abstract \
 network game. Nothing here is a real system; actions are moves in a model. Your \
-goal is to compromise the crown-jewel node and exfiltrate its data in as few \
-turns as possible while avoiding detection. You see only what you have \
-discovered. Choose exactly one action per turn by calling the provided tool."""
+goal is to reach the crown-jewel node and exfiltrate its data before the turn \
+limit, while avoiding detection. You see only what you have discovered.
+
+Access on a host is NONE < USER < ADMIN. Rules:
+- You can only act on a node marked "reachable": the internet-facing entry node, \
+a node you hold, or a neighbour of a non-isolated foothold — and only where the \
+firewall permits that segment hop. Crossing into a node in "admin_segments" \
+(e.g. the secure zone) needs ADMIN on the pivot host.
+- SCAN (needs a route) reveals a node's remote vulns, whether it has a local \
+privilege-escalation path, and its neighbours. You must SCAN a node before you \
+can EXPLOIT it.
+- EXPLOIT uses a known remote vuln to gain a foothold (usually USER).
+- ESCALATE turns USER into ADMIN on a foothold that has a local privesc path \
+(field "can_escalate"); ADMIN is required to cross into secure segments and to \
+EXFILTRATE.
+- LATERAL_MOVE (needs "source", a foothold adjacent to the target) pivots to a \
+neighbour; "lateral_from" lists sources that can legally reach a node now.
+- EXFILTRATE needs ADMIN on the crown jewel and must be repeated for several \
+turns; a re-image wipes your progress and foothold.
+- The defender reads delayed, partial logs and can investigate, patch, isolate \
+or re-image nodes. "recent_actions" shows your own last few moves and results.
+
+Choose exactly one action per turn by calling the provided tool."""
 
 BLUE_SYSTEM = """You are an autonomous Blue Team (SOC) agent in a *simulated*, \
 abstract network game. You see only a noisy, delayed telemetry feed — never \
-ground truth. Benign-noise events are false positives; attack-shaped events may \
-be real or missed entirely. Your goal is to detect and evict the intruder early \
-while keeping the network available (isolating or re-imaging healthy nodes is \
-costly). Choose exactly one action per turn by calling the provided tool."""
+ground truth. Real attacker actions are logged only some of the time and arrive \
+1-3 turns late; a host's "sensors" show its NETWORK and ENDPOINT coverage, and \
+a low or zero value is a blind spot you can offset by INVESTIGATE. Benign \
+activity is also logged, and some of it looks exactly like an attack (same kind \
+and technique), so a single event proves little — corroborating events on the \
+same or neighbouring hosts are stronger. Old events scroll out of the feed. You \
+win if the crown jewel isn't exfiltrated by the turn limit; exfiltration takes \
+the attacker several turns at ADMIN on that host.
+
+You have a limited pool of analyst action-points ("analyst_remaining"); spend \
+them where they matter.
+- MONITOR: free, observe only. INVESTIGATE (1): raise a host's detection, \
+including where a sensor is missing.
+- PATCH (2): close a host's patchable vulns; offline for a turn; stolen \
+credentials can't be patched.
+- ISOLATE (2): cut a host off until re-imaged. RESTORE (3): re-image, evicting \
+any intruder; offline for a few turns.
+Containing (isolate/restore) a genuinely compromised host scores well; acting on \
+a healthy one is a false positive, and every turn a host is offline costs \
+availability. "recent_actions" lists your own last few moves.
+
+Choose exactly one action per turn by calling the provided tool."""
 
 # Tool schemas handed to the model so it must emit structured actions.
 RED_TOOL = {
@@ -117,8 +157,14 @@ def _call_claude(system: str, user_text: str, tool: dict, model: str) -> Optiona
 
 def _prompt_from_view(view: dict, faction: Faction) -> str:
     who = "RED (attacker)" if faction is Faction.RED else "BLUE (defender)"
+    note = ""
+    telemetry = view.get("telemetry")
+    if telemetry and len(telemetry) > MAX_TELEMETRY_IN_PROMPT:
+        omitted = len(telemetry) - MAX_TELEMETRY_IN_PROMPT
+        view = {**view, "telemetry": telemetry[-MAX_TELEMETRY_IN_PROMPT:]}
+        note = f"({omitted} older telemetry events omitted.)\n"
     return (f"You are {who}. Current turn: {view['step']}.\n\n"
-            f"State you can see:\n{json.dumps(view, indent=2)}\n\n"
+            f"State you can see:\n{json.dumps(view, indent=2)}\n{note}\n"
             "Call the action tool with your single best move for this turn.")
 
 

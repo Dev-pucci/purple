@@ -24,25 +24,35 @@ from ..env.environment import Environment
 
 
 class Scorer:
-    EXFIL_BONUS = 50
+    # Winning must dominate: a Red that steals the crown jewel always outscores
+    # one that sits on footholds collecting stealth (max ~0.2 * 4 nodes * 30 steps).
+    EXFIL_BONUS = 100
     FOOTHOLD_WEIGHT = 5       # times node.value
-    STEALTH_PER_STEP = 1      # per foothold, per step it stays undetected
+    STEALTH_PER_STEP = 0.2    # per foothold, per step it stays undetected
     TRUE_POSITIVE_REWARD = 10 # Blue contains a node compromised at that moment
     FALSE_POSITIVE_PENALTY = 6
     DOWNTIME_PENALTY = 1      # per node, per step spent isolated, re-imaging or patching
 
     CONTAINMENT = ("ISOLATE", "RESTORE")
     RESPONSES = ("ISOLATE", "RESTORE", "PATCH")
-    MATERIAL = ("EXPLOIT", "LATERAL_MOVE", "EXFILTRATE")
+    MATERIAL = ("EXPLOIT", "ESCALATE", "LATERAL_MOVE", "EXFILTRATE")
 
-    def score_state(self, env: Environment) -> Dict[str, int]:
-        """Cheap incremental score of the current ground-truth state (for RL)."""
-        red = 0
+    def score_state(self, env: Environment) -> Dict[str, float]:
+        """Cheap score of the current ground-truth state (RL reward = its change).
+
+        Unfinished exfiltration earns half the bonus pro rata; a re-image wipes
+        the progress, so that credit is taken back and can't be farmed.
+        """
+        red = 0.0
         for node in env.nodes.values():
             if node.compromised:
                 red += self.FOOTHOLD_WEIGHT * node.value
         if env.red_exfiltrated:
             red += self.EXFIL_BONUS
+        else:
+            needed = env.config["exfil_steps"]
+            for progress in env.exfil_progress.values():
+                red += 0.5 * self.EXFIL_BONUS * min(progress, needed) / needed
         return {"red": red, "blue": -red}
 
     def final_report(self, env: Environment) -> Dict[str, object]:
@@ -119,8 +129,8 @@ class Scorer:
             "winner": env.winner,
             "termination_reason": env.termination_reason,
             "steps": env.step_count,
-            "red_score": red_score,
-            "blue_score": blue_score,
+            "red_score": round(red_score, 1),
+            "blue_score": round(blue_score, 1),
             "true_positives": true_pos,
             "false_positives": false_pos,
             "exfiltrated": env.red_exfiltrated,

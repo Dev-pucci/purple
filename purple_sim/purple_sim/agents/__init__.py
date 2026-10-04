@@ -2,13 +2,13 @@
 from .base import BlueAgent, RedAgent
 from .heuristic import HeuristicBlue, HeuristicRed
 from .llm_agents import LLMBlue, LLMRed
-from .rl_interface import PurpleRedEnv, RandomRLAgent, train_notes
+from .rl_interface import PolicyRed, PurpleRedEnv, RandomRLAgent, train_notes
 
 __all__ = [
     "RedAgent", "BlueAgent",
     "HeuristicRed", "HeuristicBlue",
     "LLMRed", "LLMBlue",
-    "PurpleRedEnv", "RandomRLAgent", "train_notes",
+    "PurpleRedEnv", "PolicyRed", "RandomRLAgent", "train_notes",
 ]
 
 

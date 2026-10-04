@@ -1,31 +1,39 @@
 """The Environment: shared game state + turn resolution.
 
 Keeps ground truth private. Exposes two partial *views*:
-  - red_view()  : what Red has discovered (scanned nodes, found vulns, footholds)
-  - blue_view() : the telemetry feed + the availability it can observe
+  - red_view()  : what Red has discovered (scanned nodes, vulns, its own access)
+  - blue_view() : the telemetry feed + the availability/sensors it can observe
 
-A turn is: resolve Red's action -> tick restores -> emit noise + advance the
-bus -> Blue reads its view and acts -> resolve Blue's action. Blue therefore
-sees every event whose latency has elapsed *this* step. Scoring is handled by
-the Scorer (see scoring/), from ground truth recorded on each StepResult.
+A turn is: resolve Red's action -> tick restores/patches -> emit noise + advance
+the bus -> Blue reads its view and acts -> resolve Blue's action. Blue sees
+every event whose latency has elapsed *this* step. Scoring is handled by the
+Scorer (see scoring/), from ground truth recorded on each StepResult.
 
-Movement rules:
-  - Red can only touch a node it has a *route* to: the internet-facing entry
-    node, a node it already holds, or a neighbour of a foothold it holds that
-    is not isolated. Discovery alone is not enough.
-  - An isolated node is cut off: it can't be scanned, exploited or pivoted
-    into, and a Red foothold on it can't be pivoted from or exfiltrated from.
-  - A re-imaging (RESTORE) node is offline for `restore_duration` Red turns,
-    then comes back clean and un-isolated.
-  - EXFILTRATE takes `exfil_steps` turns on the crown jewel; a re-image wipes
-    the progress.
-  - PATCH closes a node's patchable vulnerabilities but takes it offline for
-    `patch_duration` Red turns (a maintenance window). Some vulnerabilities
-    (stolen credentials) can't be patched at all.
+Attack model (abstract — no real systems or exploit code):
+  - Access is NONE < USER < ADMIN. EXPLOIT of a known remote vuln yields a
+    foothold (usually USER); ESCALATE uses a local vuln to go USER -> ADMIN.
+  - Red can only act on a node it has a *route* to: the internet-facing entry
+    node, a node it holds, or a neighbour of a non-isolated foothold — and only
+    where the firewall allows that segment hop. Crossing into an ADMIN_SEGMENT
+    (e.g. `secure`) needs ADMIN on the source.
+  - EXPLOIT needs a prior SCAN (you can't exploit what you haven't fingerprinted).
+  - EXFILTRATE needs ADMIN on the crown jewel and takes `exfil_steps` turns; a
+    re-image wipes the progress.
+  - Isolated / re-imaging / patching nodes are offline and can't be acted on.
 
-Randomness comes from three independent streams (Red's action outcomes,
-telemetry detection/latency, benign noise), so two agents run on the same
-seed face the same luck wherever their choices coincide.
+Detection:
+  - Each attack action would be logged by one sensor (NETWORK or ENDPOINT). The
+    chance is the action's base detection times the host's coverage for that
+    sensor, plus Blue's INVESTIGATE monitoring (which works even where a sensor
+    is absent). A zero-coverage sensor is a blind spot.
+
+Defender budget:
+  - Blue has a finite pool of analyst action-points for the whole game; active
+    actions cost points and do nothing once the pool is empty.
+
+Randomness comes from three independent streams (Red outcomes, telemetry
+detection/latency, benign noise), so two agents on the same seed face the same
+luck wherever their choices coincide.
 """
 from __future__ import annotations
 
@@ -33,9 +41,9 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Union
 
-from .models import (Action, BlueActionType, EventKind, Faction, Node,
-                     RedActionType, TelemetryEvent)
-from .scenario import DEFAULT_CONFIG, make_network
+from .models import (Action, AccessLevel, BlueActionType, EVENT_SENSOR, EventKind,
+                     Faction, Node, RedActionType, TelemetryEvent)
+from .scenario import ADMIN_SEGMENTS, DEFAULT_CONFIG, FIREWALL, make_network
 from .telemetry import TelemetryBus
 
 BlueInput = Union[Action, Callable[[dict], Action]]
@@ -57,34 +65,39 @@ class StepResult:
     # --- ground truth recorded for scoring (never shown to Blue) -------------
     red_executed: bool = False        # Red's action actually reached the network
     red_technique: str = ""           # ATT&CK technique Red actually used
-    red_compromised: str = ""         # node Red newly compromised this step
+    red_compromised: str = ""         # node Red newly gained a foothold on this step
     blue_target_compromised: bool = False  # was Blue's target compromised when Blue acted?
     blue_effective: bool = False      # did Blue's action change anything?
-    undetected_footholds: int = 0     # Red footholds with no true-positive telemetry visible yet
-    offline_nodes: int = 0            # nodes isolated or re-imaging at end of step
+    undetected_footholds: int = 0     # footholds with no true-positive telemetry visible yet
+    offline_nodes: int = 0            # nodes offline (isolated/re-imaging/patching) at step end
 
 
 @dataclass
 class RedKnowledge:
     """Red's private memory of what it has learned about the network."""
     discovered: set = field(default_factory=set)       # node names Red can see
-    known_vulns: Dict[str, List[str]] = field(default_factory=dict)  # node -> [cve_label]
-    footholds: set = field(default_factory=set)         # compromised node names Red holds
+    known_vulns: Dict[str, List[str]] = field(default_factory=dict)  # node -> [remote cve_label]
+    known_local: Dict[str, bool] = field(default_factory=dict)       # node -> local privesc seen
+    footholds: set = field(default_factory=set)         # nodes Red holds (access >= USER)
 
 
 class Environment:
     def __init__(self, network: Optional[Dict[str, Node]] = None,
-                 config: Optional[dict] = None):
+                 config: Optional[dict] = None, firewall: Optional[Dict[str, set]] = None):
         self.config = {**DEFAULT_CONFIG, **(config or {})}
         seed = self.config["seed"]
         self.nodes: Dict[str, Node] = network or make_network(self.config["scenario"], seed)
-        self.rng = random.Random(f"{seed}:red")  # Red action outcomes
+        # A custom network with no firewall given gets an allow-all policy (None).
+        self.firewall = firewall if firewall is not None else (
+            FIREWALL if network is None else None)
+        self.rng = random.Random(f"{seed}:red")
         self.bus = TelemetryBus(
             rng=random.Random(f"{seed}:telemetry"),
             latency=tuple(self.config["telemetry_latency"]),
             noise_per_step=self.config["noise_per_step"],
             noise_rng=random.Random(f"{seed}:noise"),
             lookalike_prob=self.config["lookalike_prob"],
+            retention=self.config["log_retention"],
         )
         self.step_count = 0
         self.max_steps = self.config["max_steps"]
@@ -94,10 +107,10 @@ class Environment:
         self.red_exfiltrated = False
         self.red = RedKnowledge()
         self.history: List[StepResult] = []
+        self.analyst_remaining = self.config["analyst_budget"]
         self._compromised_at: Dict[str, int] = {}  # node -> step Red last took it
         self.exfil_progress: Dict[str, int] = {}   # node -> EXFILTRATE turns completed
 
-        # Red always starts knowing the internet-facing entry node exists.
         for name, node in self.nodes.items():
             if node.is_entry:
                 self.red.discovered.add(name)
@@ -119,43 +132,95 @@ class Environment:
         node = self.nodes[name]
         return node.isolated or node.restoring > 0 or node.patching > 0
 
+    def _fw_allows(self, src_segment: str, dst_segment: str) -> bool:
+        if self.firewall is None:
+            return True
+        return dst_segment in self.firewall.get(src_segment, set())
+
     def _has_route(self, name: str) -> bool:
-        """Red has a network path to `name` (ignoring whether `name` itself is up)."""
+        """Red has a network path to `name` (ignoring whether `name` itself is up).
+
+        Crossing into an ADMIN_SEGMENT needs the adjacent foothold to hold ADMIN
+        (stolen domain creds), so scan/exploit/lateral into `secure` all require
+        a prior ESCALATE on the pivot host.
+        """
         if name not in self.nodes:
             return False
-        if self.nodes[name].is_entry or name in self.red.footholds:
+        node = self.nodes[name]
+        if name in self.red.footholds:
             return True
+        if node.is_entry and self._fw_allows("internet", node.segment):
+            return True
+        needs_admin = node.segment in ADMIN_SEGMENTS
         return any(name in self.nodes[f].connections and not self.offline(f)
+                   and self._fw_allows(self.nodes[f].segment, node.segment)
+                   and (not needs_admin or self.nodes[f].access >= AccessLevel.ADMIN)
                    for f in self.red.footholds)
 
     def reachable(self, name: str) -> bool:
         """Red can act on `name` this turn."""
         return self._has_route(name) and not self.offline(name)
 
+    def _lateral_sources(self, target: str) -> List[str]:
+        """Footholds that could legally pivot to `target` this turn."""
+        node = self.nodes[target]
+        if target in self.red.footholds or self.offline(target):
+            return []
+        needs_admin = node.segment in ADMIN_SEGMENTS
+        out = []
+        for f in sorted(self.red.footholds):
+            src = self.nodes[f]
+            if (not self.offline(f) and target in src.connections
+                    and self._fw_allows(src.segment, node.segment)
+                    and (not needs_admin or src.access >= AccessLevel.ADMIN)):
+                out.append(f)
+        return out
+
     def _node_technique(self, node: Node) -> str:
         return node.vulnerabilities[0].technique_id if node.vulnerabilities else "T1190"
 
-    def _compromise(self, name: str, rec: StepResult) -> None:
-        self.nodes[name].compromised = True
-        self.red.footholds.add(name)
-        self._compromised_at[name] = self.step_count
-        rec.red_compromised = name
+    def _emit(self, kind: EventKind, node: Node, technique: str, base: float) -> bool:
+        """Log an attack action, folding in the host's sensor coverage + monitoring."""
+        coverage = node.sensor_coverage(EVENT_SENSOR[kind].value)
+        prob = min(1.0, base * coverage + node.monitoring)
+        return self.bus.emit_attack(self.step_count, kind, node.name, technique, prob)
+
+    def _grant(self, name: str, level: int, rec: StepResult) -> None:
+        node = self.nodes[name]
+        was_foothold = node.compromised
+        node.access = max(node.access, level)
+        if not was_foothold:
+            self.red.footholds.add(name)
+            self._compromised_at[name] = self.step_count
+            rec.red_compromised = name
 
     # ------------------------------------------------------------------- views
     def red_view(self) -> dict:
-        """What Red knows — discovered nodes only, with its own footholds."""
-        view = {"step": self.step_count, "nodes": {}, "footholds": sorted(self.red.footholds)}
+        """What Red knows — discovered nodes only, with its own access."""
+        view = {"step": self.step_count, "max_steps": self.max_steps,
+                "exfil_steps": self.config["exfil_steps"],
+                "admin_segments": list(ADMIN_SEGMENTS), "nodes": {},
+                "footholds": sorted(self.red.footholds)}
         for name in sorted(self.red.discovered):
             node = self.nodes[name]
+            held = name in self.red.footholds
+            offline = self.offline(name)
             view["nodes"][name] = {
                 "services": node.services,
                 "connections": node.connections,
+                "segment": node.segment,
                 "is_crown_jewel": node.is_crown_jewel,
-                "compromised_by_me": name in self.red.footholds,
+                "compromised_by_me": held,
+                "access": int(node.access) if held else 0,
                 "isolated": node.isolated,
+                "offline": offline,
                 "reachable": self.reachable(name),
                 "scanned": name in self.red.known_vulns,
                 "known_vulns": self.red.known_vulns.get(name, []),
+                "can_escalate": (held and not offline and node.access < AccessLevel.ADMIN
+                                 and self.red.known_local.get(name, False)),
+                "lateral_from": self._lateral_sources(name),
+                "exfil_progress": self.exfil_progress.get(name, 0),
             }
         view["recent_actions"] = [
             {"step": r.step, "action": str(r.red_action), "result": r.red_feedback}
@@ -166,11 +231,16 @@ class Environment:
         """What Blue sees — telemetry + observable availability. No ground truth."""
         return {
             "step": self.step_count,
+            "max_steps": self.max_steps,
+            "analyst_remaining": self.analyst_remaining,
+            "analyst_budget": self.config["analyst_budget"],
             "nodes": {
                 name: {
                     "services": node.services,
                     "connections": node.connections,
+                    "segment": node.segment,
                     "is_crown_jewel": node.is_crown_jewel,
+                    "sensors": {s: round(c, 2) for s, c in node.sensors.items()},
                     "isolated": node.isolated,
                     "monitoring": round(node.monitoring, 2),
                     "restoring": node.restoring > 0,
@@ -178,8 +248,7 @@ class Environment:
                 }
                 for name, node in self.nodes.items()
             },
-            "telemetry": [e.as_blue_view() for e in self.bus.visible_events()],
-            # Blue's own moves only — never their ground-truth outcome.
+            "telemetry": [e.as_blue_view() for e in self.bus.working_events(self.step_count)],
             "recent_actions": [{"step": r.step, "action": str(r.blue_action)}
                                for r in self.history[-HISTORY_IN_VIEW:]],
         }
@@ -196,68 +265,95 @@ class Environment:
             if target not in self.red.discovered:
                 return f"SCAN failed: {target!r} not discovered yet."
             if not self._has_route(target):
-                return f"SCAN failed: no route to {target!r} (need a foothold next to it)."
+                return f"SCAN failed: no route to {target!r} (firewall or no adjacent foothold)."
             node = self.nodes[target]
             rec.red_executed, rec.red_technique = True, "T1595"
-            self.bus.emit_attack(self.step_count, EventKind.SCAN_DETECTED, target,
-                                 "T1595", 0.2 + node.monitoring)
+            self._emit(EventKind.SCAN_DETECTED, node, "T1595", 0.25)
             if self.offline(target):
                 return f"SCAN {target}: no response — node is isolated/offline."
             for neigh in node.connections:
-                self.red.discovered.add(neigh)  # discover adjacency
-            self.red.known_vulns[target] = [v.cve_label for v in node.open_vulns()]
-            return f"SCAN {target}: found {len(self.red.known_vulns[target])} vuln(s), "\
-                   f"revealed neighbours {node.connections}."
+                self.red.discovered.add(neigh)
+            self.red.known_vulns[target] = [v.cve_label for v in node.remote_vulns()]
+            self.red.known_local[target] = bool(node.local_vulns())
+            return (f"SCAN {target} [{node.segment}]: {len(self.red.known_vulns[target])} "
+                    f"remote vuln(s), neighbours {node.connections}.")
 
         if a == RedActionType.EXPLOIT.value:
             if target not in self.red.discovered:
                 return f"EXPLOIT failed: {target!r} not discovered yet."
             if not self._has_route(target):
-                return f"EXPLOIT failed: no route to {target!r} (need a foothold next to it)."
+                return f"EXPLOIT failed: no route to {target!r} (firewall or no adjacent foothold)."
+            if target not in self.red.known_vulns:
+                return f"EXPLOIT failed: SCAN {target} first to fingerprint it."
             node = self.nodes[target]
-            vulns = node.open_vulns()
+            vulns = node.remote_vulns()
             if self.offline(target) or not vulns:
                 tech = self._node_technique(node)
                 rec.red_executed, rec.red_technique = True, tech
-                self.bus.emit_attack(self.step_count, EventKind.EXPLOIT_ATTEMPT, target,
-                                     tech, 0.6 + node.monitoring)
+                self._emit(EventKind.EXPLOIT_ATTEMPT, node, tech, 0.6)
                 if self.offline(target):
                     return f"EXPLOIT {target}: blocked — node is isolated/offline."
-                self.red.known_vulns[target] = []  # Red learns it's been patched
-                return f"EXPLOIT {target}: no open vulnerabilities (patched)."
+                self.red.known_vulns[target] = []
+                return f"EXPLOIT {target}: no open remote vulnerabilities (patched)."
             vuln = max(vulns, key=lambda v: v.success_prob)
             rec.red_executed, rec.red_technique = True, vuln.technique_id
-            logged = self.bus.emit_attack(self.step_count, EventKind.EXPLOIT_ATTEMPT,
-                                          target, vuln.technique_id,
-                                          vuln.detection_prob + node.monitoring)
+            self._emit(EventKind.EXPLOIT_ATTEMPT, node, vuln.technique_id, vuln.detection_prob)
             if self.rng.random() <= vuln.success_prob:
-                self._compromise(target, rec)
-                rec.red_feedback = f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS."
-                seen = " (telemetry logged)" if logged else " (undetected)"
-                return f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS{seen}."
+                self._grant(target, vuln.grants, rec)
+                lvl = AccessLevel(self.nodes[target].access).name
+                rec.red_feedback = f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS ({lvl})."
+                return rec.red_feedback
             return f"EXPLOIT {target} via {vuln.technique_id}: attempt failed."
 
+        if a == RedActionType.ESCALATE.value:
+            if target not in self.red.footholds:
+                return f"ESCALATE failed: no foothold on {target!r}."
+            node = self.nodes[target]
+            if self.offline(target):
+                return f"ESCALATE failed: {target!r} is isolated/offline."
+            if node.access >= AccessLevel.ADMIN:
+                return f"ESCALATE {target}: already ADMIN (no-op)."
+            locals_ = node.local_vulns()
+            rec.red_executed, rec.red_technique = True, "T1068"
+            self._emit(EventKind.PRIVESC_DETECTED, node,
+                       locals_[0].technique_id if locals_ else "T1068",
+                       self.config["escalate_detection"])
+            if not locals_:
+                return f"ESCALATE {target}: no local privilege-escalation vector (patched)."
+            vuln = max(locals_, key=lambda v: v.success_prob)
+            if self.rng.random() <= vuln.success_prob:
+                node.access = AccessLevel.ADMIN
+                rec.red_feedback = f"ESCALATE {target} via {vuln.technique_id}: now ADMIN."
+                return rec.red_feedback
+            return f"ESCALATE {target} via {vuln.technique_id}: attempt failed."
+
         if a == RedActionType.LATERAL_MOVE.value:
-            # Credentialed pivot (T1021): works even on patched hosts, but less reliably.
             src = action.params.get("source", "")
             if src not in self.red.footholds:
                 return f"LATERAL_MOVE failed: no foothold on source {src!r}."
-            if self.offline(src):
-                return f"LATERAL_MOVE failed: source {src!r} is isolated/offline."
-            if target not in self.nodes[src].connections:
-                return f"LATERAL_MOVE failed: {target!r} not adjacent to {src!r}."
             if target in self.red.footholds:
                 return f"LATERAL_MOVE failed: already hold {target!r}."
+            if target not in self.nodes[src].connections:
+                return f"LATERAL_MOVE failed: {target!r} not adjacent to {src!r}."
+            src_node, node = self.nodes[src], self.nodes[target]
+            if self.offline(src):
+                return f"LATERAL_MOVE failed: source {src!r} is isolated/offline."
+            if not self._fw_allows(src_node.segment, node.segment):
+                return (f"LATERAL_MOVE failed: firewall blocks {src_node.segment}"
+                        f"->{node.segment}.")
+            if node.segment in ADMIN_SEGMENTS and src_node.access < AccessLevel.ADMIN:
+                return (f"LATERAL_MOVE failed: crossing into {node.segment} needs ADMIN "
+                        f"on {src}.")
             self.red.discovered.add(target)
-            node = self.nodes[target]
             rec.red_executed, rec.red_technique = True, "T1021"
-            self.bus.emit_attack(self.step_count, EventKind.LATERAL_DETECTED, target,
-                                 "T1021", self.config["lateral_detection"] + node.monitoring)
+            self._emit(EventKind.LATERAL_DETECTED, node, "T1021",
+                       self.config["lateral_detection"])
             if self.offline(target):
                 return f"LATERAL_MOVE {src}->{target}: blocked — node is isolated/offline."
             if self.rng.random() <= self.config["lateral_success"]:
-                self._compromise(target, rec)
-                return f"LATERAL_MOVE {src}->{target}: SUCCESS, now hold {target}."
+                self._grant(target, AccessLevel.USER, rec)
+                rec.red_feedback = f"LATERAL_MOVE {src}->{target}: SUCCESS, hold {target} (USER)."
+                return rec.red_feedback
             return f"LATERAL_MOVE {src}->{target}: credentials rejected."
 
         if a == RedActionType.EXFILTRATE.value:
@@ -266,17 +362,18 @@ class Environment:
             node = self.nodes[target]
             if not node.is_crown_jewel:
                 return f"EXFILTRATE {target}: nothing valuable here."
+            if node.access < AccessLevel.ADMIN:
+                return f"EXFILTRATE {target}: need ADMIN here first (ESCALATE)."
             rec.red_executed, rec.red_technique = True, "T1048"
-            self.bus.emit_attack(self.step_count, EventKind.EXFIL_DETECTED, target,
-                                 "T1048", self.config["exfil_detection"] + node.monitoring)
+            self._emit(EventKind.EXFIL_DETECTED, node, "T1048", self.config["exfil_detection"])
             if self.offline(target):
                 return f"EXFILTRATE {target}: blocked — node is isolated/offline."
-            # Pulling a database out takes several turns; progress is lost on eviction.
             self.exfil_progress[target] = self.exfil_progress.get(target, 0) + 1
             needed = self.config["exfil_steps"]
             if self.exfil_progress[target] < needed:
-                return f"EXFILTRATE {target}: transferring data "\
-                       f"({self.exfil_progress[target]}/{needed})."
+                rec.red_feedback = (f"EXFILTRATE {target}: transferring "
+                                    f"({self.exfil_progress[target]}/{needed}).")
+                return rec.red_feedback
             self.red_exfiltrated = True
             return f"EXFILTRATE {target}: CROWN JEWEL DATA STOLEN."
 
@@ -293,9 +390,20 @@ class Environment:
             return f"Unknown Blue action {a!r}."
         if target not in self.nodes:
             return f"{a} failed: {target!r} unknown."
+
+        budget_on = self.config["analyst_budget"] > 0
+        cost = self.config["analyst_costs"].get(a, 0)
+        if budget_on and self.analyst_remaining < cost:
+            return f"{a} {target}: no analyst capacity (budget exhausted)."
+
         node = self.nodes[target]
         rec.blue_target_compromised = node.compromised
+        outcome = self._apply_blue(a, target, node, rec)
+        if rec.blue_effective and budget_on:
+            self.analyst_remaining -= cost
+        return outcome
 
+    def _apply_blue(self, a: str, target: str, node: Node, rec: StepResult) -> str:
         if a == BlueActionType.INVESTIGATE.value:
             before = node.monitoring
             node.monitoring = min(1.0, node.monitoring + self.config["investigate_boost"])
@@ -317,15 +425,14 @@ class Environment:
                 v.patched = True
             node.patching = max(node.patching, self.config["patch_duration"])
             rec.blue_effective = True
-            return f"PATCH {target}: {len(vulns)} vulnerability(ies) closed "\
-                   f"(maintenance window)."
+            return f"PATCH {target}: {len(vulns)} vulnerability(ies) closed (maintenance window)."
 
         if a == BlueActionType.RESTORE.value:
             if node.restoring > 0:
                 return f"RESTORE {target}: already re-imaging (no-op)."
             node.restoring = self.config["restore_duration"]
             was_compromised = node.compromised
-            node.compromised = False
+            node.access = AccessLevel.NONE
             self.red.footholds.discard(target)
             self.exfil_progress.pop(target, None)
             rec.blue_effective = True
@@ -378,7 +485,6 @@ class Environment:
         rec.undetected_footholds = self._undetected_footholds()
         rec.offline_nodes = sum(1 for n in self.nodes if self.offline(n))
 
-        # termination
         if self.red_exfiltrated:
             self.done = True
             self.winner = Faction.RED.value

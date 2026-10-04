@@ -1,36 +1,45 @@
 """Telemetry bus: the noisy, delayed feed that is the *only* thing Blue sees.
 
 This is the single most important design choice in the whole project. Ground
-truth (which nodes are really compromised) lives in the Environment and is never
+truth (which hosts Red really controls) lives in the Environment and is never
 handed to Blue. Blue reasons purely over these events — some real (true
 positives, possibly delayed or missed entirely), some benign noise (false
 positives). Some of that noise is *look-alike*: benign activity carrying an
 attack-shaped event kind, so Blue can't filter false positives by kind alone.
-A detection only "counts" when Blue acts correctly on real signal.
+
+Each event is produced by a sensor (NETWORK or ENDPOINT). A host can be strong
+on one sensor and blind on the other, so whether a real action is logged
+depends on the host's coverage for that sensor — the Environment folds that in
+before calling `emit_attack`. Blue only acts on events inside a retention
+window; older ones scroll off its working view (but stay in the record the
+Purple report is scored against).
 """
 from __future__ import annotations
 
 import random
 from typing import Dict, List, Optional
 
-from .models import LOOKALIKE_NOISE, EventKind, TelemetryEvent
+from .models import LOOKALIKE_NOISE, EVENT_SENSOR, EventKind, Sensor, TelemetryEvent
 
 # Technique a look-alike event of each kind carries (exploit look-alikes use the
 # host's own technique, supplied by the Environment, so they can't be told apart).
 _LOOKALIKE_TECHNIQUE = {EventKind.SCAN_DETECTED: "T1595",
-                        EventKind.LATERAL_DETECTED: "T1021"}
+                        EventKind.LATERAL_DETECTED: "T1021",
+                        EventKind.PRIVESC_DETECTED: "T1068"}
 
 
 class TelemetryBus:
     def __init__(self, rng: random.Random, latency: tuple[int, int], noise_per_step: int,
-                 noise_rng: Optional[random.Random] = None, lookalike_prob: float = 0.0):
+                 noise_rng: Optional[random.Random] = None, lookalike_prob: float = 0.0,
+                 retention: int = 0):
         self.rng = rng                      # detection + latency rolls for real events
         self.noise_rng = noise_rng or rng   # benign noise draws from its own stream
         self.latency = latency
         self.noise_per_step = noise_per_step
         self.lookalike_prob = lookalike_prob
+        self.retention = retention          # 0 = keep everything in Blue's working view
         self._pending: List[TelemetryEvent] = []   # emitted but not yet visible
-        self._visible: List[TelemetryEvent] = []    # Blue can read these
+        self._visible: List[TelemetryEvent] = []    # the full visible record
 
     def _latency(self, rng: random.Random) -> int:
         lo, hi = self.latency
@@ -40,7 +49,8 @@ class TelemetryBus:
                     detection_prob: float) -> bool:
         """Maybe log a real attack action. Returns True if it was logged.
 
-        Missing it entirely (prob = 1 - detection_prob) models a blind spot.
+        `detection_prob` is already folded with the host's sensor coverage and
+        Blue's monitoring. Missing it entirely models a blind spot.
         """
         if self.rng.random() > detection_prob:
             return False
@@ -50,6 +60,7 @@ class TelemetryBus:
             kind=kind.value,
             node=node,
             technique_id=technique_id,
+            sensor=EVENT_SENSOR[kind].value,
             is_true_positive=True,
         ))
         return True
@@ -66,16 +77,18 @@ class TelemetryBus:
         weights = list(LOOKALIKE_NOISE.values())
         for _ in range(self.noise_per_step):
             node = rng.choice(nodes)
-            kind, technique = EventKind.BENIGN_NOISE, ""
+            kind, technique, sensor = EventKind.BENIGN_NOISE, "", ""
             if rng.random() < self.lookalike_prob:
                 kind = rng.choices(kinds, weights)[0]
                 technique = _LOOKALIKE_TECHNIQUE.get(kind, exploit_techniques[node])
+                sensor = EVENT_SENSOR[kind].value
             self._pending.append(TelemetryEvent(
                 step_emitted=step,
                 visible_at=step + self._latency(rng),
                 kind=kind.value,
                 node=node,
                 technique_id=technique,
+                sensor=sensor,
                 is_true_positive=False,
             ))
 
@@ -87,4 +100,11 @@ class TelemetryBus:
         return newly_visible
 
     def visible_events(self) -> List[TelemetryEvent]:
+        """The full record of everything that ever became visible (for scoring)."""
         return list(self._visible)
+
+    def working_events(self, step: int) -> List[TelemetryEvent]:
+        """What Blue can act on now: visible and within the retention window."""
+        if self.retention <= 0:
+            return list(self._visible)
+        return [e for e in self._visible if step - e.step_emitted < self.retention]

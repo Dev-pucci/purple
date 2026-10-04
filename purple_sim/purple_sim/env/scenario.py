@@ -1,100 +1,103 @@
 """Scenarios: the hand-built default network plus a seeded random generator.
 
-Default topology (edges are bidirectional reachability):
+Default topology (edges are bidirectional reachability; segments in brackets):
 
     internet
        |
-   [web_dmz]  --- [app_server] --- [db_cluster]*   (* crown jewel)
-                        |
-                   [workstation]
+   [web_dmz:dmz] --- [app_server:internal] --- [db_cluster:secure]*  (* crown jewel)
+                            |
+                     [workstation:internal]
 
-Red starts with a foothold path through web_dmz (the entry node). The goal is
-to reach db_cluster and exfiltrate. Blue must detect and evict without taking
-the whole network down.
+Red starts internet-facing at web_dmz. To steal the data it must gain a
+foothold (EXPLOIT a known remote vuln after a SCAN), pivot inward
+(LATERAL_MOVE), cross the firewall into the `secure` segment (which needs ADMIN,
+so it must ESCALATE), and finally hold the crown jewel at ADMIN to EXFILTRATE.
 
-`random_network(seed)` builds a different enterprise-shaped network per seed:
-1-2 internet-facing entry nodes, 3-6 internal hosts with extra cross-links (so
-there is usually more than one route), and the crown jewel behind 1-2 internal
-hosts. Every entry node also has an unpatchable credential route (T1078), so
-Blue can slow Red's initial access with patching but never fully close it.
+A firewall allows traffic only between the segment pairs in `FIREWALL`.
+Each host carries sensors (NETWORK / ENDPOINT) with a coverage level; a low or
+zero coverage is a detection blind spot. Entry nodes also carry an unpatchable
+stolen-credentials vuln (T1078), so Blue can slow initial access but never
+fully close it.
+
+`random_network(seed)` builds a different enterprise-shaped network per seed.
 """
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from .models import Node, Vulnerability
+from .models import AccessLevel, Node, Sensor, Vulnerability
+
+# Directed firewall policy: src_segment -> segments reachable from it. Crossing
+# into a segment in ADMIN_SEGMENTS additionally requires ADMIN on the source.
+FIREWALL: Dict[str, set] = {
+    "internet": {"dmz"},
+    "dmz": {"dmz", "internal"},
+    "internal": {"internal", "dmz", "secure"},
+    "secure": {"secure", "internal"},
+}
+ADMIN_SEGMENTS = ("secure",)
 
 
 def _stolen_credentials(label: str) -> Vulnerability:
     """Phished/reused credentials: always usable, no patch fixes them."""
-    return Vulnerability(technique_id="T1078", name="Valid Accounts", cve_label=label,
-                         success_prob=0.25, detection_prob=0.3, patchable=False)
+    return Vulnerability("T1078", "Valid Accounts", label, success_prob=0.3,
+                         detection_prob=0.3, service="auth", grants=AccessLevel.USER,
+                         patchable=False)
+
+
+def _privesc(label: str, success: float = 0.8, detection: float = 0.5) -> Vulnerability:
+    """A local privilege-escalation weakness: USER -> ADMIN via ESCALATE."""
+    return Vulnerability("T1068", "Exploitation for Privilege Escalation", label,
+                         success_prob=success, detection_prob=detection,
+                         service="os", grants=AccessLevel.ADMIN, local=True)
 
 
 def default_network() -> Dict[str, Node]:
     return {
         "web_dmz": Node(
-            name="web_dmz",
-            services=["http", "https"],
-            is_entry=True,
-            value=1,
-            connections=["app_server"],
+            name="web_dmz", segment="dmz", is_entry=True, value=1,
+            services=["http", "https"], connections=["app_server"],
+            sensors={Sensor.NETWORK: 0.8, Sensor.ENDPOINT: 0.6},
             vulnerabilities=[
-                Vulnerability(
-                    technique_id="T1190",
-                    name="Exploit Public-Facing Application",
-                    cve_label="CVE-SIM-0001",
-                    success_prob=0.75,
-                    detection_prob=0.45,
-                ),
+                Vulnerability("T1190", "Exploit Public-Facing Application", "CVE-SIM-0001",
+                              success_prob=0.75, detection_prob=0.45, service="http",
+                              grants=AccessLevel.USER),
                 _stolen_credentials("CRED-SIM-0001"),
+                _privesc("CVE-SIM-0001P"),
             ],
         ),
         "app_server": Node(
-            name="app_server",
-            services=["http", "rpc"],
-            value=2,
-            connections=["web_dmz", "db_cluster", "workstation"],
+            name="app_server", segment="internal", value=2,
+            services=["http", "rpc"], connections=["web_dmz", "db_cluster", "workstation"],
+            sensors={Sensor.NETWORK: 0.7, Sensor.ENDPOINT: 0.7},
             vulnerabilities=[
-                Vulnerability(
-                    technique_id="T1210",
-                    name="Exploitation of Remote Services",
-                    cve_label="CVE-SIM-0002",
-                    success_prob=0.6,
-                    detection_prob=0.5,
-                ),
+                Vulnerability("T1210", "Exploitation of Remote Services", "CVE-SIM-0002",
+                              success_prob=0.6, detection_prob=0.5, service="rpc",
+                              grants=AccessLevel.USER),
+                _privesc("CVE-SIM-0002P"),
             ],
         ),
         "workstation": Node(
-            name="workstation",
-            services=["smb"],
-            value=1,
-            connections=["app_server"],
+            name="workstation", segment="internal", value=1,
+            services=["smb"], connections=["app_server"],
+            sensors={Sensor.NETWORK: 0.6, Sensor.ENDPOINT: 0.0},  # EDR blind spot
             vulnerabilities=[
-                Vulnerability(
-                    technique_id="T1078",
-                    name="Valid Accounts",
-                    cve_label="CVE-SIM-0003",
-                    success_prob=0.55,
-                    detection_prob=0.35,
-                ),
+                Vulnerability("T1078", "Valid Accounts", "CVE-SIM-0003",
+                              success_prob=0.55, detection_prob=0.35, service="smb",
+                              grants=AccessLevel.USER),
+                _privesc("CVE-SIM-0003P"),
             ],
         ),
         "db_cluster": Node(
-            name="db_cluster",
-            services=["postgresql"],
-            value=5,
-            is_crown_jewel=True,
-            connections=["app_server"],
+            name="db_cluster", segment="secure", is_crown_jewel=True, value=5,
+            services=["postgresql"], connections=["app_server"],
+            sensors={Sensor.NETWORK: 0.8, Sensor.ENDPOINT: 0.9},
             vulnerabilities=[
-                Vulnerability(
-                    technique_id="T1210",
-                    name="Exploitation of Remote Services",
-                    cve_label="CVE-SIM-0004",
-                    success_prob=0.5,
-                    detection_prob=0.7,
-                ),
+                Vulnerability("T1210", "Exploitation of Remote Services", "CVE-SIM-0004",
+                              success_prob=0.5, detection_prob=0.7, service="postgresql",
+                              grants=AccessLevel.USER),
+                _privesc("CVE-SIM-0004P"),
             ],
         ),
     }
@@ -108,10 +111,9 @@ _INTERNAL_ROLES = {
     "hr_workstation": ["smb"], "print_server": ["ipp"], "domain_controller": ["ldap", "kerberos"],
     "backup_server": ["ssh", "rsync"],
 }
-_INTERNAL_VULNS = [
-    # technique, name, success range, detection range
+_REMOTE_VULNS = [
     ("T1210", "Exploitation of Remote Services", (0.5, 0.7), (0.4, 0.6)),
-    ("T1078", "Valid Accounts", (0.45, 0.6), (0.3, 0.45)),
+    ("T1190", "Exploit Public-Facing Application", (0.55, 0.75), (0.4, 0.6)),
 ]
 
 
@@ -129,39 +131,58 @@ def random_network(seed: int, internal: Optional[int] = None) -> Dict[str, Node]
     def link(a: str, b: str) -> None:
         edges.add(tuple(sorted((a, b))))
 
-    # Spanning tree hanging off the entry nodes, then cross-links for extra routes.
     placed: List[str] = list(entries)
     for role in roles:
         link(role, rng.choice(placed))
         placed.append(role)
-    for entry in entries:  # every entry node must lead somewhere
+    for entry in entries:
         if not any(entry in e for e in edges):
             link(entry, rng.choice(roles))
     for i, a in enumerate(roles):
         for b in roles[i + 1:]:
             if rng.random() < 0.25:
                 link(a, b)
-    # The crown jewel sits behind 1-2 internal hosts, never directly on the DMZ.
     for role in rng.sample(roles, min(len(roles), rng.choice([1, 2, 2]))):
         link(jewel, role)
 
     counter = iter(range(1, 1000))
     label = lambda: f"CVE-SIM-R{next(counter):03d}"  # noqa: E731
+
+    def sensors() -> Dict[str, float]:
+        # Occasionally a sensor is absent (coverage 0) — a blind spot.
+        net = rng.choice([0.0, 0.5, 0.6, 0.7, 0.8])
+        edr = rng.choice([0.0, 0.0, 0.4, 0.6, 0.8])
+        return {Sensor.NETWORK: net, Sensor.ENDPOINT: edr}
+
     nodes: Dict[str, Node] = {}
     for name in entries:
-        nodes[name] = Node(name=name, services=_ENTRY_ROLES[name], is_entry=True, value=1,
-                           vulnerabilities=[
+        svc = _ENTRY_ROLES[name]
+        nodes[name] = Node(name=name, segment="dmz", is_entry=True, value=1, services=svc,
+                           sensors=sensors(), vulnerabilities=[
                                Vulnerability("T1190", "Exploit Public-Facing Application",
-                                             label(), u((0.6, 0.8)), u((0.35, 0.55))),
+                                             label(), u((0.6, 0.8)), u((0.35, 0.55)),
+                                             service=svc[0], grants=AccessLevel.USER),
                                _stolen_credentials(f"CRED-SIM-{name}"),
+                               _privesc(label()),
                            ])
     for name in roles:
-        tech, vname, succ, det = rng.choice(_INTERNAL_VULNS)
-        nodes[name] = Node(name=name, services=_INTERNAL_ROLES[name], value=rng.randint(1, 3),
-                           vulnerabilities=[Vulnerability(tech, vname, label(), u(succ), u(det))])
-    nodes[jewel] = Node(name=jewel, services=["postgresql"], value=5, is_crown_jewel=True,
-                        vulnerabilities=[Vulnerability("T1210", "Exploitation of Remote Services",
-                                                       label(), u((0.45, 0.6)), u((0.6, 0.8)))])
+        tech, vname, succ, det = rng.choice(_REMOTE_VULNS)
+        svc = _INTERNAL_ROLES[name]
+        nodes[name] = Node(name=name, segment="internal", value=rng.randint(1, 3), services=svc,
+                           sensors=sensors(), vulnerabilities=[
+                               Vulnerability(tech, vname, label(), u(succ), u(det),
+                                             service=svc[0], grants=AccessLevel.USER),
+                               _privesc(label()),
+                           ])
+    nodes[jewel] = Node(name=jewel, segment="secure", is_crown_jewel=True, value=5,
+                        services=["postgresql"],
+                        sensors={Sensor.NETWORK: u((0.7, 0.9)), Sensor.ENDPOINT: u((0.7, 0.9))},
+                        vulnerabilities=[
+                            Vulnerability("T1210", "Exploitation of Remote Services", label(),
+                                          u((0.45, 0.6)), u((0.6, 0.8)), service="postgresql",
+                                          grants=AccessLevel.USER),
+                            _privesc(label()),
+                        ])
     for a, b in sorted(edges):
         nodes[a].connections.append(b)
         nodes[b].connections.append(a)
@@ -181,16 +202,20 @@ def make_network(scenario: str, seed: int) -> Dict[str, Node]:
 
 DEFAULT_CONFIG = {
     "scenario": "default",         # "default" (hand-built) or "random" (seeded generator)
-    "max_steps": 30,
+    "max_steps": 40,
     "seed": 7,
     "telemetry_latency": (1, 3),   # min..max steps before Blue sees an event
     "noise_per_step": 1,           # benign noise events per step (false positives)
     "lookalike_prob": 0.3,         # share of noise that looks like an attack event
+    "log_retention": 12,           # steps an event stays in Blue's working view (0 = forever)
     "investigate_boost": 0.35,     # detection_prob added to a node when investigated
     "restore_duration": 2,         # Red turns a node stays offline while re-imaging
     "patch_duration": 1,           # Red turns a node stays offline while patching
-    "lateral_success": 0.35,       # chance a credentialed LATERAL_MOVE takes over a neighbour
+    "escalate_detection": 0.5,     # base chance an ESCALATE is logged
+    "lateral_success": 0.5,        # chance a LATERAL_MOVE foothold takes
     "lateral_detection": 0.4,      # base chance a LATERAL_MOVE shows up in telemetry
     "exfil_steps": 3,              # EXFILTRATE turns needed to steal the crown jewel
     "exfil_detection": 0.8,        # base chance each EXFILTRATE turn is logged
+    "analyst_budget": 50,          # total action-points Blue may spend across a game (0 = unlimited)
+    "analyst_costs": {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3},
 }
