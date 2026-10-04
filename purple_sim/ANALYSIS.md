@@ -11,12 +11,16 @@ resemble your own site. Nothing here touches a real system.
 > is the bottleneck" — turned out to be an artifact of a weak defender. Treated
 > honestly below.
 
-Reproduce:
+Reproduce (every table below comes from these):
 
 ```bash
-python run.py --analyze --scenario enterprise --episodes 400 --quiet            # heuristic Blue
-python run.py --analyze --scenario enterprise --episodes 400 --quiet --blue soc # smarter Blue
+python experiments.py                         # all three studies (defenders, posture, sensitivity)
+python experiments.py --study sensitivity      # just the enterprise intervention sweep
+python run.py --analyze --scenario enterprise --episodes 400 --quiet --blue soc  # blind-spot map
 ```
+
+> Numbers are from ~200–400-game runs and move a few points run to run; the
+> *relationships* are the findings, not the exact figures.
 
 ## The modelled network
 

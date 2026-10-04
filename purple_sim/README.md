@@ -279,7 +279,8 @@ something. The biggest levers are `analyst_budget` (how much Blue can do),
 ```
 purple_sim/
   run.py                     # launcher: python run.py
-  train_rl.py                # train + evaluate a MaskablePPO Red (needs gymnasium + SB3 + sb3-contrib)
+  experiments.py             # reproduce the ANALYSIS.md studies (zero deps)
+  train_rl.py                # train + evaluate a MaskablePPO Red/Blue (needs gymnasium + SB3 + sb3-contrib)
   purple_sim/
     env/
       models.py              # Node, Vulnerability, Action, TelemetryEvent, AccessLevel, Sensor
