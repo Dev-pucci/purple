@@ -176,6 +176,11 @@ Access on a host is **NONE < USER < ADMIN**. Red works a kill chain:
   Traffic is allowed only between the segment pairs in `FIREWALL`. Crossing into
   an `ADMIN_SEGMENT` (the `secure` zone) requires **ADMIN** on the pivot host —
   so reaching the crown jewel forces an ESCALATE, not just a lucky path.
+- **Identity is tier-0.** A host flagged `is_identity` (a domain controller)
+  hands Red *domain-wide* credentials once taken at ADMIN: it can then pivot to
+  any domain-joined host without adjacency and across the firewall — modelling
+  "own the DC, own the domain". The `enterprise` scenario's `domain_controller`
+  is one, so protecting it is its own defensive lever.
 - **Isolation cuts a node off.** Red can't scan, exploit, escalate on, or pivot
   into/out of it.
 - **RESTORE re-images.** Evicts Red at once; the node is offline for

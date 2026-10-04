@@ -210,7 +210,7 @@ def enterprise_network() -> Dict[str, Node]:
                               +-- app_server --- db_cluster*  [secure] (* crown jewel)
     """
     def host(name, segment, services, conns, net, edr, value=1, remote=None,
-             entry=False, jewel=False):
+             entry=False, jewel=False, identity=False):
         vulns = []
         if remote is not None:
             vulns.append(remote)
@@ -218,7 +218,7 @@ def enterprise_network() -> Dict[str, Node]:
             vulns.append(_stolen_credentials(f"CRED-{name}"))
         vulns.append(_privesc(f"PRIV-{name}"))
         return Node(name=name, segment=segment, services=services, connections=conns,
-                    value=value, is_entry=entry, is_crown_jewel=jewel,
+                    value=value, is_entry=entry, is_crown_jewel=jewel, is_identity=identity,
                     sensors={Sensor.NETWORK: net, Sensor.ENDPOINT: edr},
                     vulnerabilities=vulns)
 
@@ -238,6 +238,7 @@ def enterprise_network() -> Dict[str, Node]:
              remote=_remote("T1021", "Remote Services", "CVE-ENT-04", 0.55, 0.5, "rdp")),
         host("domain_controller", "internal", ["ldap", "kerberos"],
              ["app_server", "file_server", "workstation_eng", "workstation_hr"], 0.8, 0.9, value=4,
+             identity=True,  # tier-0: ADMIN here grants domain-wide lateral movement
              remote=_remote("T1210", "Exploitation of Remote Services", "CVE-ENT-05",
                             0.5, 0.6, "ldap")),
         host("file_server", "internal", ["smb"],

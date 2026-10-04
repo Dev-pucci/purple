@@ -96,6 +96,7 @@ class Node:
     value: int = 1             # reward weight for Red compromising this node
     is_crown_jewel: bool = False  # holds the data Red wants to exfiltrate
     is_entry: bool = False     # Red's starting foothold / internet-facing
+    is_identity: bool = False  # identity hub (e.g. domain controller): ADMIN here = domain-wide creds
     segment: str = "internal"  # network zone (firewall policy is between segments)
     sensors: Dict[str, float] = field(default_factory=dict)  # Sensor value -> coverage 0..1
 

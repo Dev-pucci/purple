@@ -162,7 +162,14 @@ class Environment:
         return self._has_route(name) and not self.offline(name)
 
     def _lateral_sources(self, target: str) -> List[str]:
-        """Footholds that could legally pivot to `target` this turn."""
+        """Footholds that could legally pivot to `target` this turn.
+
+        Normally this means an adjacent, firewall-permitted foothold (ADMIN on
+        it when crossing into a secure segment). But ADMIN on an *identity* host
+        (a domain controller) yields domain-wide credentials: it can pivot to
+        any domain-joined host (every non-entry node) without adjacency —
+        modelling "own the DC, own the domain".
+        """
         node = self.nodes[target]
         if target in self.red.footholds or self.offline(target):
             return []
@@ -170,9 +177,13 @@ class Environment:
         out = []
         for f in sorted(self.red.footholds):
             src = self.nodes[f]
-            if (not self.offline(f) and target in src.connections
-                    and self._fw_allows(src.segment, node.segment)
-                    and (not needs_admin or src.access >= AccessLevel.ADMIN)):
+            if self.offline(f):
+                continue
+            adjacent = (target in src.connections and self._fw_allows(src.segment, node.segment)
+                        and (not needs_admin or src.access >= AccessLevel.ADMIN))
+            domain = (src.is_identity and src.access >= AccessLevel.ADMIN
+                      and not node.is_entry)
+            if adjacent or domain:
                 out.append(f)
         return out
 
@@ -210,6 +221,7 @@ class Environment:
                 "connections": node.connections,
                 "segment": node.segment,
                 "is_crown_jewel": node.is_crown_jewel,
+                "is_identity": node.is_identity,
                 "compromised_by_me": held,
                 "access": int(node.access) if held else 0,
                 "isolated": node.isolated,
@@ -345,17 +357,24 @@ class Environment:
                 return f"LATERAL_MOVE failed: no foothold on source {src!r}."
             if target in self.red.footholds:
                 return f"LATERAL_MOVE failed: already hold {target!r}."
-            if target not in self.nodes[src].connections:
-                return f"LATERAL_MOVE failed: {target!r} not adjacent to {src!r}."
+            if target not in self.nodes:
+                return f"LATERAL_MOVE failed: {target!r} unknown."
             src_node, node = self.nodes[src], self.nodes[target]
             if self.offline(src):
                 return f"LATERAL_MOVE failed: source {src!r} is isolated/offline."
-            if not self._fw_allows(src_node.segment, node.segment):
-                return (f"LATERAL_MOVE failed: firewall blocks {src_node.segment}"
-                        f"->{node.segment}.")
-            if node.segment in ADMIN_SEGMENTS and src_node.access < AccessLevel.ADMIN:
-                return (f"LATERAL_MOVE failed: crossing into {node.segment} needs ADMIN "
-                        f"on {src}.")
+            # Domain credentials from an ADMIN identity host bypass adjacency and
+            # the firewall (domain-joined hosts trust the DC).
+            domain = (src_node.is_identity and src_node.access >= AccessLevel.ADMIN
+                      and not node.is_entry)
+            if not domain:
+                if target not in src_node.connections:
+                    return f"LATERAL_MOVE failed: {target!r} not adjacent to {src!r}."
+                if not self._fw_allows(src_node.segment, node.segment):
+                    return (f"LATERAL_MOVE failed: firewall blocks {src_node.segment}"
+                            f"->{node.segment}.")
+                if node.segment in ADMIN_SEGMENTS and src_node.access < AccessLevel.ADMIN:
+                    return (f"LATERAL_MOVE failed: crossing into {node.segment} needs ADMIN "
+                            f"on {src}.")
             self.red.discovered.add(target)
             rec.red_executed, rec.red_technique = True, "T1021"
             self._emit(EventKind.LATERAL_DETECTED, node, "T1021",

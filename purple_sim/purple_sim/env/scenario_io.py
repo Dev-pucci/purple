@@ -60,7 +60,8 @@ def _node_from(d: dict) -> Node:
         name=d["name"], segment=d.get("segment", "internal"),
         services=list(d.get("services", [])), connections=list(d.get("connections", [])),
         value=int(d.get("value", 1)), is_entry=bool(d.get("entry", False)),
-        is_crown_jewel=bool(d.get("crown_jewel", False)), sensors=sensors,
+        is_crown_jewel=bool(d.get("crown_jewel", False)),
+        is_identity=bool(d.get("identity", False)), sensors=sensors,
         vulnerabilities=[_vuln_from(v) for v in d.get("vulnerabilities", [])])
 
 
@@ -118,6 +119,8 @@ def scenario_to_dict(nodes: Dict[str, Node], firewall: Optional[Dict[str, set]] 
             d["entry"] = True
         if node.is_crown_jewel:
             d["crown_jewel"] = True
+        if node.is_identity:
+            d["identity"] = True
         node_list.append(d)
     out["nodes"] = node_list
     return out

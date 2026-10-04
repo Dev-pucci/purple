@@ -628,6 +628,29 @@ def test_scenario_json_rejects_malformed():
         assert "crown_jewel" in str(e)
 
 
+def test_identity_host_admin_grants_domain_wide_lateral():
+    from purple_sim.env.models import Node, Vulnerability
+    rce = Vulnerability("T1190", "x", "C", 1.0, 0.0, service="http")
+    dc = Node("dc", segment="internal", is_entry=True, is_identity=True,
+              connections=[], vulnerabilities=[rce])
+    far = Node("far", segment="internal", connections=[],   # NOT adjacent to dc
+               vulnerabilities=[Vulnerability("T1210", "y", "D", 1.0, 0.0)])
+    jewel = Node("jewel", segment="secure", is_crown_jewel=True, connections=[],
+                 vulnerabilities=[Vulnerability("T1210", "z", "E", 1.0, 0.0)])
+    env = Environment(network={"dc": dc, "far": far, "jewel": jewel},
+                      firewall=None, config={"lateral_success": 1.0})
+    give_foothold(env, "dc", AccessLevel.USER)
+    env.red.discovered.update({"far", "jewel"})
+    # USER on the DC: no domain creds yet, and nothing is adjacent.
+    assert env.red_view()["nodes"]["far"]["lateral_from"] == []
+    env.nodes["dc"].access = int(AccessLevel.ADMIN)
+    view = env.red_view()
+    assert view["nodes"]["far"]["lateral_from"] == ["dc"]       # domain-wide now
+    assert view["nodes"]["jewel"]["lateral_from"] == ["dc"]      # even into secure
+    r = env.step(red("LATERAL_MOVE", source="dc", target="jewel"), MONITOR)
+    assert r.red_executed and "jewel" in env.red.footholds
+
+
 def test_archetype_scenarios_build_and_terminate():
     from purple_sim.env.scenario import SCENARIOS
     for scenario in SCENARIOS:
