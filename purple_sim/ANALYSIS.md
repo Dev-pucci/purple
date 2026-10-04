@@ -96,6 +96,22 @@ path to the crown jewel. Visibility where the attacker isn't going improves
 your coverage metric without improving the outcome. **Sensor placement relative
 to the attack path matters more than sensor count.**
 
+## Finding 4 — the latency result holds against a *learned* attacker
+
+The findings above use the scripted Red. Re-running with a trained
+MaskablePPO Red (200 games, default network) confirms they aren't an artifact
+of a hand-coded attacker:
+
+| Defender | slow logs (latency 1–3) | fast logs (latency 1) |
+|---|---|---|
+| HeuristicBlue | Red 35% | Red 16% |
+| SOCBlue | Red 35% | Red **6%** |
+
+Against a competent defender, cutting detection delay collapses even the
+learned attacker's win rate (35% → 6%), and the smart defender exploits the
+faster signal far better than the weak one (6% vs 16%). Detection *speed* is
+the robust high-leverage lever.
+
 ## So what actually helps?
 
 For a defender that is already competent and not capacity-starved — the state
