@@ -217,8 +217,9 @@ class Environment:
                 "reachable": self.reachable(name),
                 "scanned": name in self.red.known_vulns,
                 "known_vulns": self.red.known_vulns.get(name, []),
-                "can_escalate": (held and not offline and node.access < AccessLevel.ADMIN
-                                 and self.red.known_local.get(name, False)),
+                # A foothold below ADMIN can always attempt escalation (a known
+                # local vuln, else the harder token-theft fallback).
+                "can_escalate": held and not offline and node.access < AccessLevel.ADMIN,
                 "lateral_from": self._lateral_sources(name),
                 "exfil_progress": self.exfil_progress.get(name, 0),
             }
@@ -318,19 +319,25 @@ class Environment:
                 return f"ESCALATE failed: {target!r} is isolated/offline."
             if node.access >= AccessLevel.ADMIN:
                 return f"ESCALATE {target}: already ADMIN (no-op)."
+            # A patched host still has a *harder* escalation path (token/credential
+            # theft, T1134) that patching can't fully close — so patching raises
+            # the bar but never permanently denies ADMIN. (Without this, patching
+            # the crown jewel's one privesc vuln is a dominant, trivial defence —
+            # a model single-point-of-failure the RL Blue discovered and exploited.)
             locals_ = node.local_vulns()
-            rec.red_executed, rec.red_technique = True, "T1068"
-            self._emit(EventKind.PRIVESC_DETECTED, node,
-                       locals_[0].technique_id if locals_ else "T1068",
+            if locals_:
+                vuln = max(locals_, key=lambda v: v.success_prob)
+                success, tech = vuln.success_prob, vuln.technique_id
+            else:
+                success, tech = self.config["escalate_fallback_success"], "T1134"
+            rec.red_executed, rec.red_technique = True, tech
+            self._emit(EventKind.PRIVESC_DETECTED, node, tech,
                        self.config["escalate_detection"] * det_mult)
-            if not locals_:
-                return f"ESCALATE {target}: no local privilege-escalation vector (patched)."
-            vuln = max(locals_, key=lambda v: v.success_prob)
-            if self.rng.random() <= vuln.success_prob * succ_mult:
+            if self.rng.random() <= success * succ_mult:
                 node.access = AccessLevel.ADMIN
-                rec.red_feedback = f"ESCALATE {target} via {vuln.technique_id}: now ADMIN."
+                rec.red_feedback = f"ESCALATE {target} via {tech}: now ADMIN."
                 return rec.red_feedback
-            return f"ESCALATE {target} via {vuln.technique_id}: attempt failed."
+            return f"ESCALATE {target} via {tech}: attempt failed."
 
         if a == RedActionType.LATERAL_MOVE.value:
             src = action.params.get("source", "")

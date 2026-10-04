@@ -322,6 +322,7 @@ DEFAULT_CONFIG = {
     "restore_duration": 2,         # Red turns a node stays offline while re-imaging
     "patch_duration": 1,           # Red turns a node stays offline while patching
     "escalate_detection": 0.5,     # base chance an ESCALATE is logged
+    "escalate_fallback_success": 0.2,  # harder token-theft privesc when the vuln is patched
     "lateral_success": 0.5,        # chance a LATERAL_MOVE foothold takes
     "lateral_detection": 0.4,      # base chance a LATERAL_MOVE shows up in telemetry
     "exfil_steps": 3,              # EXFILTRATE turns needed to steal the crown jewel
