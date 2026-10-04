@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 purple_sim/models/
 .claude/settings.local.json
+*.egg-info/
+build/
+dist/
