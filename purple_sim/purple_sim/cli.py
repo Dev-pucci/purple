@@ -145,7 +145,7 @@ def main(argv=None) -> None:
     p.add_argument("--red", default="heuristic", choices=["heuristic", "llm", "rl"])
     p.add_argument("--rl-model", default="models/ppo_red.zip",
                    help="Trained PPO model for --red rl (see train_rl.py).")
-    p.add_argument("--blue", default="heuristic", choices=["heuristic", "llm"])
+    p.add_argument("--blue", default="heuristic", choices=["heuristic", "soc", "llm"])
     p.add_argument("--live", action="store_true",
                    help="Use the real Claude API for LLM agents (needs ANTHROPIC_API_KEY).")
     p.add_argument("--episodes", type=int, default=1, help="Run N games and average.")

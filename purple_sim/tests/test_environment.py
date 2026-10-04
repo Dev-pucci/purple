@@ -507,6 +507,16 @@ def test_heuristic_red_reaches_admin_and_exfiltrates_sometimes():
     assert wins > 0   # the kill chain can actually complete
 
 
+def test_soc_blue_runs_and_respects_budget_and_ground_truth():
+    env = Environment(config={"seed": 40, "analyst_budget": 6})
+    report = Orchestrator(env, make_red("heuristic"), make_blue("soc"),
+                          SimConfig(verbose=False, show_report=False)).run()
+    assert report["winner"] in ("RED", "BLUE")
+    assert env.analyst_remaining >= 0            # never overspent the budget
+    for info in env.blue_view()["nodes"].values():
+        assert "access" not in info               # still no ground-truth leak
+
+
 def test_heuristic_blue_does_not_refixate_after_restore():
     agent = HeuristicBlue()
     alerts = [{"step": "1", "kind": "LATERAL_DETECTED", "node": "workstation"}] * 2

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python run.py --episodes 300 --quiet --blue heuristic)",
+      "Bash(python run.py --episodes 300 --quiet --blue soc)",
+      "Bash(python run.py --episodes 200 --quiet --scenario enterprise --blue heuristic)",
+      "Bash(python run.py --episodes 200 --quiet --scenario enterprise --blue soc)"
+    ]
+  }
+}

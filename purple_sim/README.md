@@ -36,7 +36,7 @@ environment, so you can mix and match.
 
 | Family | Where | Needs |
 |---|---|---|
-| **Heuristic** | `agents/heuristic.py` | nothing — deterministic baselines |
+| **Heuristic** | `agents/heuristic.py`, `agents/soc.py` | nothing — deterministic baselines (`heuristic` and the stronger budget-aware `soc` Blue) |
 | **LLM** | `agents/llm_agents.py` | nothing in *mock* mode; `anthropic` + API key for *live* |
 | **RL** | `agents/rl_interface.py`, `agents/gym_env.py`, `train_rl.py` | nothing for the stub; `gymnasium` + `stable-baselines3` + `sb3-contrib` to train |
 
@@ -258,7 +258,8 @@ purple_sim/
       environment.py         # state machine, views, turn resolution
     agents/
       base.py                # RedAgent / BlueAgent interfaces
-      heuristic.py           # deterministic baselines
+      heuristic.py           # deterministic baselines (kill-chain Red, SOC-analyst Blue)
+      soc.py                 # stronger budget-aware Blue (--blue soc)
       llm_agents.py          # mock + live Claude agents (tool-calling)
       rl_interface.py        # zero-dep Gym-style env, PolicyRed, RL stub
       gym_env.py             # gymnasium adapter + loading a trained policy
@@ -277,6 +278,8 @@ purple_sim/
 - Get RL Red clearly past the heuristic: reward-shape the intermediate chain
   (reaching ADMIN, crossing into `secure`) or try a recurrent policy — more
   steps alone plateau at ~39%.
+- Compare defenders: `--blue soc` (recency/severity, correlation, budget
+  discipline) clearly beats `--blue heuristic` — see `ANALYSIS.md`.
 - Train an RL Blue against the PPO Red and alternate (self-play).
 - Make RL work on random networks (a fixed-size, role-indexed node encoding).
 - Add an LLM-as-judge pass that scores the trace for Red stealth and Blue
