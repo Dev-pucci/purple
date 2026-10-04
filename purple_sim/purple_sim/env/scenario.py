@@ -369,10 +369,85 @@ def webapp_network() -> Dict[str, Node]:
     }
 
 
-SCENARIOS = ("default", "random", "enterprise", "flat", "webapp")
+def webapp_micro_network() -> Dict[str, Node]:
+    """A microservices/API web posture: an API gateway fronting several services,
+    an OAuth identity service, a secrets vault and the user database. Same engine
+    and caveats as `webapp`; a different shape (more east-west paths between
+    services, a vault holding reusable credentials — OWASP A02) so red/blue
+    trade-offs can be compared across architectures.
+
+        internet -> [api_gateway : web]  (WAF; A05 misconfig, A03 injection)
+                       /         \\
+         [orders_svc : app]   [users_svc : app]   (A01 broken access, A10 SSRF)
+              |    \\               |
+     [secrets_vault : secure]   [auth_svc : app, identity] (A07)
+                                     |
+                              [user_db : secure]*  (* crown jewel)
+    """
+    def v(tech, name, cve, succ, det, service, grants=AccessLevel.USER, local=False):
+        return Vulnerability(tech, name, cve, succ, det, service=service,
+                             grants=grants, local=local)
+
+    return {
+        "api_gateway": Node(
+            name="api_gateway", segment="web", is_entry=True, value=1,
+            services=["https"], connections=["orders_svc", "users_svc"],
+            sensors={Sensor.NETWORK: 0.85, Sensor.ENDPOINT: 0.45},
+            vulnerabilities=[
+                v("T1190", "A05 Security Misconfiguration", "WM-A05", 0.6, 0.6, "https"),
+                v("T1190", "A03 Injection", "WM-A03", 0.5, 0.6, "https"),
+            ]),
+        "orders_svc": Node(
+            name="orders_svc", segment="app", value=2,
+            services=["http-api"], connections=["api_gateway", "auth_svc", "secrets_vault",
+                                                "user_db"],
+            sensors={Sensor.NETWORK: 0.5, Sensor.ENDPOINT: 0.55},
+            vulnerabilities=[
+                v("T1078", "A01 Broken Access Control", "WM-A01o", 0.6, 0.45, "http-api"),
+                v("T1090", "A10 SSRF pivot", "WM-A10", 0.55, 0.4, "http-api",
+                  local=True, grants=AccessLevel.ADMIN),
+            ]),
+        "users_svc": Node(
+            name="users_svc", segment="app", value=2,
+            services=["http-api"], connections=["api_gateway", "auth_svc"],
+            sensors={Sensor.NETWORK: 0.5, Sensor.ENDPOINT: 0.5},
+            vulnerabilities=[
+                v("T1078", "A01 Broken Access Control", "WM-A01u", 0.6, 0.45, "http-api"),
+            ]),
+        "auth_svc": Node(
+            name="auth_svc", segment="app", is_identity=True, value=4,
+            services=["oauth"], connections=["orders_svc", "users_svc", "user_db"],
+            sensors={Sensor.NETWORK: 0.6, Sensor.ENDPOINT: 0.7},
+            vulnerabilities=[
+                v("T1078", "A07 Auth failure (token theft)", "WM-A07", 0.5, 0.5, "oauth"),
+                _privesc("WM-A07P"),
+            ]),
+        "secrets_vault": Node(
+            name="secrets_vault", segment="secure", value=4,
+            services=["vault"], connections=["orders_svc"],
+            sensors={Sensor.NETWORK: 0.7, Sensor.ENDPOINT: 0.8},
+            vulnerabilities=[
+                v("T1552", "A02 Cryptographic Failures (exposed secrets)", "WM-A02",
+                  0.5, 0.6, "vault"),
+                _privesc("WM-A02P"),
+            ]),
+        "user_db": Node(
+            name="user_db", segment="secure", is_crown_jewel=True, value=5,
+            services=["postgresql"], connections=["orders_svc", "auth_svc"],
+            sensors={Sensor.NETWORK: 0.7, Sensor.ENDPOINT: 0.85},
+            vulnerabilities=[
+                v("T1213", "A01 Direct object access", "WM-DB", 0.5, 0.7, "postgresql"),
+                _privesc("WM-DBP"),
+            ]),
+    }
+
+
+SCENARIOS = ("default", "random", "enterprise", "flat", "webapp", "webapp_micro")
 _BUILDERS = {"default": default_network, "enterprise": enterprise_network,
-             "flat": flat_network, "webapp": webapp_network}
-_FIREWALLS = {"webapp": WEBAPP_FIREWALL}  # others fall back to the network FIREWALL
+             "flat": flat_network, "webapp": webapp_network,
+             "webapp_micro": webapp_micro_network}
+# Web scenarios use the web-layer firewall; others fall back to the network FIREWALL.
+_FIREWALLS = {"webapp": WEBAPP_FIREWALL, "webapp_micro": WEBAPP_FIREWALL}
 
 
 def make_network(scenario: str, seed: int) -> Dict[str, Node]:

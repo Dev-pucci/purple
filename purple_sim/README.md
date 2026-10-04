@@ -150,8 +150,11 @@ on availability-priced score, with comparable coverage. Play it with
 
 Two web-security pieces sit alongside the network sim:
 
-- **`webapp` scenario** (above) — the attack-path model for a web app's trust
-  layers, analysed exactly like the network scenarios.
+- **Web red/blue scenarios** — `webapp` (a monolith by trust layer) and
+  `webapp_micro` (an API gateway + microservices + secrets vault), analysed
+  exactly like the network scenarios. [`WEB.md`](WEB.md) is the guide: the web
+  kill chain, an OWASP Top 10 → red move → blue control → detection mapping, and
+  how to run them.
 - **`webcheck`** — a standalone, offline analyzer for HTTP response headers and
   cookies. It makes no network connections; you feed it headers you already
   have, and it flags missing/weak controls (HSTS, CSP, `nosniff`, framing,
