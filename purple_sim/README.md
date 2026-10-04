@@ -9,7 +9,10 @@ actually saw and acted on — the honest way, not Blue grading its own homework.
 
 This is a **model**. Nothing touches a real network. Vulnerabilities are
 abstract flags; "CVE"/technique labels are just strings used for vocabulary and
-scoring. There is no exploit code anywhere in this project.
+scoring. There is no exploit code anywhere in this project. The shipped
+parameters are **illustrative, not validated** — good for studying
+relationships, not for quoting absolute numbers about a real site until
+calibrated and checked (see [`CALIBRATION.md`](CALIBRATION.md)).
 
 It borrows one idea each from the main open-source efforts in this space:
 abstract network-as-a-game (CyberBattleSim), separate delayed Blue telemetry
