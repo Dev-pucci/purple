@@ -4,27 +4,37 @@ This is the single most important design choice in the whole project. Ground
 truth (which nodes are really compromised) lives in the Environment and is never
 handed to Blue. Blue reasons purely over these events — some real (true
 positives, possibly delayed or missed entirely), some benign noise (false
-positives). A detection only "counts" when Blue acts correctly on real signal.
+positives). Some of that noise is *look-alike*: benign activity carrying an
+attack-shaped event kind, so Blue can't filter false positives by kind alone.
+A detection only "counts" when Blue acts correctly on real signal.
 """
 from __future__ import annotations
 
 import random
-from typing import List
+from typing import Dict, List, Optional
 
-from .models import EventKind, TelemetryEvent
+from .models import LOOKALIKE_NOISE, EventKind, TelemetryEvent
+
+# Technique a look-alike event of each kind carries (exploit look-alikes use the
+# host's own technique, supplied by the Environment, so they can't be told apart).
+_LOOKALIKE_TECHNIQUE = {EventKind.SCAN_DETECTED: "T1595",
+                        EventKind.LATERAL_DETECTED: "T1021"}
 
 
 class TelemetryBus:
-    def __init__(self, rng: random.Random, latency: tuple[int, int], noise_per_step: int):
-        self.rng = rng
+    def __init__(self, rng: random.Random, latency: tuple[int, int], noise_per_step: int,
+                 noise_rng: Optional[random.Random] = None, lookalike_prob: float = 0.0):
+        self.rng = rng                      # detection + latency rolls for real events
+        self.noise_rng = noise_rng or rng   # benign noise draws from its own stream
         self.latency = latency
         self.noise_per_step = noise_per_step
+        self.lookalike_prob = lookalike_prob
         self._pending: List[TelemetryEvent] = []   # emitted but not yet visible
         self._visible: List[TelemetryEvent] = []    # Blue can read these
 
-    def _latency(self) -> int:
+    def _latency(self, rng: random.Random) -> int:
         lo, hi = self.latency
-        return self.rng.randint(lo, hi)
+        return rng.randint(lo, hi)
 
     def emit_attack(self, step: int, kind: EventKind, node: str, technique_id: str,
                     detection_prob: float) -> bool:
@@ -36,7 +46,7 @@ class TelemetryBus:
             return False
         self._pending.append(TelemetryEvent(
             step_emitted=step,
-            visible_at=step + self._latency(),
+            visible_at=step + self._latency(self.rng),
             kind=kind.value,
             node=node,
             technique_id=technique_id,
@@ -44,16 +54,28 @@ class TelemetryBus:
         ))
         return True
 
-    def emit_noise(self, step: int, nodes: List[str]) -> None:
-        """Inject benign events so Blue cannot treat 'any event' as an attack."""
+    def emit_noise(self, step: int, exploit_techniques: Dict[str, str]) -> None:
+        """Inject benign events so Blue cannot treat 'any event' as an attack.
+
+        `exploit_techniques` maps every node to the technique an exploit
+        look-alike on that node should carry.
+        """
+        rng = self.noise_rng
+        nodes = list(exploit_techniques)
+        kinds = list(LOOKALIKE_NOISE)
+        weights = list(LOOKALIKE_NOISE.values())
         for _ in range(self.noise_per_step):
-            node = self.rng.choice(nodes)
+            node = rng.choice(nodes)
+            kind, technique = EventKind.BENIGN_NOISE, ""
+            if rng.random() < self.lookalike_prob:
+                kind = rng.choices(kinds, weights)[0]
+                technique = _LOOKALIKE_TECHNIQUE.get(kind, exploit_techniques[node])
             self._pending.append(TelemetryEvent(
                 step_emitted=step,
-                visible_at=step + self._latency(),
-                kind=EventKind.BENIGN_NOISE.value,
+                visible_at=step + self._latency(rng),
+                kind=kind.value,
                 node=node,
-                technique_id="",
+                technique_id=technique,
                 is_true_positive=False,
             ))
 

@@ -36,6 +36,16 @@ class EventKind(str, Enum):
     BENIGN_NOISE = "BENIGN_NOISE"
 
 
+# Benign activity that *looks* like an attack (admin port scans, failed logins,
+# legit remote sessions) — the false positives Blue has to reason about.
+# kind -> relative frequency among look-alike events.
+LOOKALIKE_NOISE = {
+    EventKind.SCAN_DETECTED: 0.6,
+    EventKind.EXPLOIT_ATTEMPT: 0.25,
+    EventKind.LATERAL_DETECTED: 0.15,
+}
+
+
 @dataclass
 class Vulnerability:
     """An abstract weakness on a node. Not a real exploit — just a labelled flag."""
@@ -45,6 +55,7 @@ class Vulnerability:
     success_prob: float        # chance an EXPLOIT attempt lands (0..1)
     detection_prob: float      # base chance the attempt shows up in telemetry (0..1)
     patched: bool = False
+    patchable: bool = True     # False for e.g. stolen credentials: no patch fixes them
 
 
 @dataclass
@@ -63,9 +74,13 @@ class Node:
     isolated: bool = False
     monitoring: float = 0.0    # extra detection probability added by Blue
     restoring: int = 0         # steps remaining in a RESTORE operation
+    patching: int = 0          # steps remaining in a PATCH maintenance window
 
     def open_vulns(self) -> List[Vulnerability]:
         return [v for v in self.vulnerabilities if not v.patched]
+
+    def patchable_vulns(self) -> List[Vulnerability]:
+        return [v for v in self.open_vulns() if v.patchable]
 
 
 @dataclass

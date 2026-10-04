@@ -8,9 +8,9 @@ Design intent:
     nodes (false positives), and charged for every node-step of downtime
     (isolated or re-imaging). No-op actions earn nothing either way.
   - Purple coverage = of the attack steps Red actually executed, how many
-    produced a genuine telemetry event that Blue then responded to (isolate,
-    restore or patch that host) at or after the moment the event became
-    visible. This is the real deliverable: a map of detection blind spots,
+    produced a genuine telemetry event that Blue then responded to (isolate or
+    restore that host, or patch it while still clean) at or after the moment
+    the event became visible. This is the real deliverable: a map of detection blind spots,
     correlated the honest way (ground truth vs what Blue saw), not Blue grading
     its own homework.
 
@@ -29,7 +29,7 @@ class Scorer:
     STEALTH_PER_STEP = 1      # per foothold, per step it stays undetected
     TRUE_POSITIVE_REWARD = 10 # Blue contains a node compromised at that moment
     FALSE_POSITIVE_PENALTY = 6
-    DOWNTIME_PENALTY = 1      # per node, per step spent isolated or re-imaging
+    DOWNTIME_PENALTY = 1      # per node, per step spent isolated, re-imaging or patching
 
     CONTAINMENT = ("ISOLATE", "RESTORE")
     RESPONSES = ("ISOLATE", "RESTORE", "PATCH")
@@ -76,10 +76,14 @@ class Scorer:
         # never seen, so only visible ones count.
         tp_event = {(e.step_emitted, e.node): e
                     for e in env.bus.visible_events() if e.is_true_positive}
+        # A patch only counts while the host is still clean: it doesn't evict anyone.
         responses: Dict[str, List[int]] = {}
         for r in history:
-            if r.blue_action and r.blue_effective and r.blue_action.type in self.RESPONSES:
-                responses.setdefault(r.blue_action.params.get("target", ""), []).append(r.step)
+            if not (r.blue_action and r.blue_effective and r.blue_action.type in self.RESPONSES):
+                continue
+            if r.blue_action.type == "PATCH" and r.blue_target_compromised:
+                continue
+            responses.setdefault(r.blue_action.params.get("target", ""), []).append(r.step)
 
         coverage_rows = []
         for r in history:

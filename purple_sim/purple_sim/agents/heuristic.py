@@ -72,9 +72,9 @@ class HeuristicBlue(BlueAgent):
     contain a hot node > patch a host seeing exploit attempts > investigate.
     """
 
-    # suspicion thresholds
+    # suspicion thresholds (tuned so heuristic vs heuristic is roughly even)
     INVESTIGATE_AT = 1
-    CONTAIN_AT = 3
+    CONTAIN_AT = 2
     SUSPICION_WINDOW = 8   # alerts older than this many steps age out
 
     WEIGHTS = {"SCAN_DETECTED": 1, "EXPLOIT_ATTEMPT": 2,

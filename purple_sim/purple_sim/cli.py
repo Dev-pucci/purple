@@ -16,6 +16,7 @@ import statistics
 from .agents import make_blue, make_red
 from .agents.rl_interface import PurpleRedEnv, RandomRLAgent, train_notes
 from .env.environment import Environment
+from .env.scenario import SCENARIOS
 from .orchestrator import Orchestrator, SimConfig
 
 
@@ -29,8 +30,12 @@ def _report_fallbacks(args, agents_turns) -> None:
             print(f"[llm] {label}: {fell_back}/{turns} turns fell back to the heuristic brain.")
 
 
+def _env(args, seed: int) -> Environment:
+    return Environment(config={"seed": seed, "scenario": args.scenario})
+
+
 def _single(args) -> dict:
-    env = Environment(config={"seed": args.seed})
+    env = _env(args, args.seed)
     red = make_red(args.red, mock=not args.live)
     blue = make_blue(args.blue, mock=not args.live)
     orch = Orchestrator(env, red, blue,
@@ -46,7 +51,7 @@ def _batch(args) -> None:
     coverages, red_scores, blue_scores, red_wins, blue_wins = [], [], [], 0, 0
     reds, blues, turns = [], [], 0
     for i in range(args.episodes):
-        env = Environment(config={"seed": args.seed + i})
+        env = _env(args, args.seed + i)
         red = make_red(args.red, mock=not args.live)
         blue = make_blue(args.blue, mock=not args.live)
         report = Orchestrator(env, red, blue,
@@ -61,7 +66,8 @@ def _batch(args) -> None:
             red_wins += 1
         else:
             blue_wins += 1
-    print(f"\n=== BATCH: {args.episodes} episodes ({args.red} Red vs {args.blue} Blue) ===")
+    print(f"\n=== BATCH: {args.episodes} episodes, {args.scenario} scenario "
+          f"({args.red} Red vs {args.blue} Blue) ===")
     print(f"Red wins:  {red_wins}")
     print(f"Blue wins: {blue_wins}")
     print(f"Mean scores: Red {statistics.mean(red_scores):.1f}   "
@@ -95,6 +101,8 @@ def main(argv=None) -> None:
                    help="Use the real Claude API for LLM agents (needs ANTHROPIC_API_KEY).")
     p.add_argument("--episodes", type=int, default=1, help="Run N games and average.")
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--scenario", default="default", choices=list(SCENARIOS),
+                   help="'random' builds a different seeded network per episode.")
     p.add_argument("--quiet", action="store_true", help="Suppress per-turn trace.")
     p.add_argument("--no-color", action="store_true")
     p.add_argument("--rl-demo", action="store_true", help="Run the Gym-style RL demo.")

@@ -218,6 +218,104 @@ def test_heuristic_red_pivots_around_a_patched_crown_jewel():
     assert actions.count(("SCAN", "db_cluster")) == 1  # no rescan loop
 
 
+def test_some_noise_looks_like_an_attack_but_is_a_false_positive():
+    env = Environment(config={"seed": 20, "noise_per_step": 3, "lookalike_prob": 0.5,
+                              "max_steps": 20})
+    while not env.done:
+        env.step(WAIT, MONITOR)
+    events = env.bus.visible_events()
+    lookalikes = [e for e in events if e.kind != "BENIGN_NOISE"]
+    assert lookalikes and not any(e.is_true_positive for e in lookalikes)
+    # Exploit look-alikes carry the host's own technique, so kind+technique can't tell.
+    for e in lookalikes:
+        if e.kind == "EXPLOIT_ATTEMPT":
+            assert e.technique_id == env.nodes[e.node].vulnerabilities[0].technique_id
+
+
+def test_patch_has_a_maintenance_window_and_skips_unpatchable_vulns():
+    env = Environment(config={"seed": 21, "patch_duration": 1})
+    r = env.step(WAIT, blue("PATCH", "web_dmz"))
+    assert r.blue_effective and r.offline_nodes == 1
+    r = env.step(red("EXPLOIT", target="web_dmz"), MONITOR)
+    assert "offline" in r.red_outcome          # down for the window
+    open_vulns = env.nodes["web_dmz"].open_vulns()
+    assert [v.technique_id for v in open_vulns] == ["T1078"]  # credentials survive
+    r = env.step(WAIT, blue("PATCH", "web_dmz"))
+    assert not r.blue_effective                 # nothing patchable left
+
+
+def test_exfiltration_takes_several_turns_and_restore_wipes_progress():
+    env = Environment(config={"seed": 22, "exfil_steps": 3})
+    give_foothold(env, "app_server")
+    give_foothold(env, "db_cluster")
+    exfil = red("EXFILTRATE", target="db_cluster")
+    env.step(exfil, MONITOR)
+    env.step(exfil, blue("RESTORE", "db_cluster"))  # evicted at 2/3
+    assert not env.red_exfiltrated and "db_cluster" not in env.exfil_progress
+    env = Environment(config={"seed": 22, "exfil_steps": 3})
+    give_foothold(env, "app_server")
+    give_foothold(env, "db_cluster")
+    for _ in range(3):
+        env.step(exfil, MONITOR)
+    assert env.red_exfiltrated and env.winner == "RED"
+
+
+def test_random_networks_are_seeded_and_winnable():
+    from purple_sim.env.scenario import random_network
+    for seed in range(50):
+        net = random_network(seed)
+        assert net.keys() == random_network(seed).keys()
+        entries = [n for n, node in net.items() if node.is_entry]
+        jewel = next(n for n, node in net.items() if node.is_crown_jewel)
+        assert entries and not any(jewel in net[e].connections for e in entries)
+        for a, node in net.items():  # links are symmetric
+            assert all(a in net[b].connections for b in node.connections)
+        seen, frontier = set(entries), list(entries)  # jewel reachable from outside
+        while frontier:
+            for nb in net[frontier.pop()].connections:
+                if nb not in seen:
+                    seen.add(nb)
+                    frontier.append(nb)
+        assert jewel in seen
+    assert any(len(random_network(s)) != len(random_network(0)) for s in range(1, 20))
+
+
+def test_same_seed_gives_red_the_same_luck_whatever_blue_does():
+    plan = [red("SCAN", target="web_dmz"), red("EXPLOIT", target="web_dmz"),
+            red("EXPLOIT", target="web_dmz"), red("EXPLOIT", target="web_dmz")]
+    outcomes = []
+    for blue_move in (MONITOR, blue("PATCH", "workstation")):
+        env = Environment(config={"seed": 23, "noise_per_step": 2})
+        outcomes.append([env.step(a, blue_move).red_feedback for a in plan])
+    assert outcomes[0] == outcomes[1]
+
+
+def test_views_show_own_history_without_leaking_the_other_side():
+    env = Environment(config={"seed": 24})
+    make_certain(env, "web_dmz")
+    env.step(red("EXPLOIT", target="web_dmz"), blue("RESTORE", "app_server"))
+    red_hist = env.red_view()["recent_actions"]
+    assert red_hist and "SUCCESS" in red_hist[0]["result"]
+    assert "telemetry" not in red_hist[0]["result"] and "undetected" not in red_hist[0]["result"]
+    blue_hist = env.blue_view()["recent_actions"]
+    assert blue_hist == [{"step": 1, "action": "RESTORE app_server"}]  # no outcome
+
+
+def test_downtime_and_stealth_are_scored():
+    env = Environment(config={"seed": 25, "max_steps": 5, "noise_per_step": 0})
+    for v in env.nodes["web_dmz"].vulnerabilities:
+        v.success_prob, v.detection_prob = 1.0, 0.0   # silent break-in
+    env.step(red("EXPLOIT", target="web_dmz"), blue("ISOLATE", "workstation"))
+    while not env.done:
+        env.step(WAIT, MONITOR)
+    report = Scorer().final_report(env)
+    # workstation isolated for all 5 steps, and it was healthy -> false positive.
+    assert report["blue_score"] == -5 * Scorer.DOWNTIME_PENALTY - Scorer.FALSE_POSITIVE_PENALTY
+    # web_dmz held undetected for all 5 steps.
+    value = env.nodes["web_dmz"].value
+    assert report["red_score"] == Scorer.FOOTHOLD_WEIGHT * value + 5 * Scorer.STEALTH_PER_STEP
+
+
 def test_heuristic_blue_does_not_refixate_after_restore():
     agent = HeuristicBlue()
     alerts = [{"step": "1", "kind": "LATERAL_DETECTED", "node": "workstation",

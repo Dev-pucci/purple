@@ -23,7 +23,8 @@ cd purple_sim
 python run.py                      # heuristic Red vs heuristic Blue, full trace
 python run.py --quiet              # just the final report + coverage
 python run.py --episodes 50 --quiet  # batch: win rates + mean coverage
-python tests/test_environment.py   # smoke tests
+python run.py --episodes 50 --quiet --scenario random  # a different seeded network per game
+python tests/test_environment.py   # tests
 ```
 
 Everything above runs on a stock Python 3.10+ with **no pip installs**.
@@ -69,7 +70,7 @@ making it subclass `gymnasium.Env` is a few lines, then PPO drops straight in.
 
 ```
 Red picks + resolves its action  ->  emit telemetry (maybe; maybe delayed)
-                                 ->  tick restores (finished re-images come back online)
+                                 ->  tick restores/patches (finished ones come back online)
                                  ->  emit benign noise, advance the telemetry bus
                                  ->  Blue picks its action from ONLY the visible telemetry
                                      (including events released this step), then it resolves
@@ -90,8 +91,22 @@ Red wins by exfiltrating the crown jewel; Blue wins by surviving to `max_steps`.
   a foothold on it can't be pivoted from or exfiltrated from.
 - **RESTORE re-images.** It evicts Red at once. The node is then offline for
   `restore_duration` Red turns and comes back clean and un-isolated.
+- **PATCH needs a maintenance window.** It closes the node's patchable
+  vulnerabilities but takes it offline for `patch_duration` Red turns. Stolen
+  credentials (T1078 on every entry node) can't be patched, so Blue can slow
+  Red's way in but never lock it out for good.
+- **Exfiltration takes time.** Red has to EXFILTRATE from the crown jewel for
+  `exfil_steps` turns, and a re-image wipes its progress. That window is
+  Blue's last chance.
 - Isolating an already-isolated node, patching a patched one, or restoring one
   that's already re-imaging is a no-op.
+
+### Scenarios
+
+`--scenario default` is the hand-built 4-node network in `env/scenario.py`.
+`--scenario random` generates a different network per seed: 1–2 entry nodes,
+3–6 internal hosts with cross-links (so there's usually more than one route),
+and the crown jewel behind 1–2 internal hosts, never directly on the DMZ.
 
 ## Why the design choices matter
 
@@ -100,7 +115,17 @@ Red wins by exfiltrating the crown jewel; Blue wins by surviving to `max_steps`.
   this). Blue infers from telemetry alone.
 - **Telemetry is noisy and delayed.** Each real attack action is logged only with
   some probability (a blind spot if missed), appears 1–3 steps later, and is
-  mixed with benign false positives. This is what makes the defender's job real.
+  mixed with benign false positives. Some of that noise *looks* like an attack
+  (admin scans, failed logins, legit remote sessions), with the same event kind
+  and technique as the real thing, so Blue can't filter it out by type. This is
+  what makes the defender's job real.
+- **Each side sees its own recent moves.** Both views include the last few
+  actions that side took. Red sees its results, but not whether they were
+  logged. Blue sees only what it did, never whether a node really was
+  compromised.
+- **Fair comparisons.** Red's action outcomes, telemetry and noise each draw
+  from their own random stream, so two agents run on the same seed face the
+  same luck wherever their choices coincide.
 - **Containment has a cost.** A containment (isolate/restore) is a true
   positive only if the node was compromised *at the moment Blue acted*.
   Containing a healthy node is a false positive, and every node-step spent
@@ -108,8 +133,9 @@ Red wins by exfiltrating the crown jewel; Blue wins by surviving to `max_steps`.
   it can't farm points by re-imaging the same node over and over.
 - **Coverage is correlated honestly.** `coverage_pct` = of the attack steps Red
   executed (exploit, lateral move, exfiltrate), how many produced a genuine
-  telemetry event that Blue then *responded to* on that host (isolate, restore
-  or patch; investigate is triage, not a response). The response must come at
+  telemetry event that Blue then *responded to* on that host (isolate or
+  restore, or patch while the host is still clean; investigate is triage, not a
+  response). The response must come at
   or after the step the event became visible. The report also gives
   per-technique coverage and mean time-to-respond.
 - **Live LLM fallbacks are visible.** With `--live`, any turn the model didn't
@@ -122,18 +148,22 @@ Edit `env/scenario.py` (`DEFAULT_CONFIG`) or pass a config dict to `Environment`
 
 | Knob | Effect |
 |---|---|
+| `scenario` | `"default"` or `"random"` network |
 | `telemetry_latency` | how many steps before Blue sees an event |
 | `noise_per_step` | false-positive volume |
+| `lookalike_prob` | share of noise that looks like an attack |
 | `investigate_boost` | how much INVESTIGATE sharpens future detection |
-| `restore_duration` | Red turns a node stays offline while re-imaging |
+| `restore_duration` / `patch_duration` | Red turns a node stays offline while re-imaging / patching |
 | `lateral_success` / `lateral_detection` | odds a credentialed pivot works / is logged |
+| `exfil_steps` / `exfil_detection` | EXFILTRATE turns needed / odds each one is logged |
 | `max_steps` | game length / Red's time budget |
 
-Out of the box, Blue loses a lot (heuristic vs heuristic: Red wins ~46/50).
-Red reaches the crown jewel in about 8 turns, and telemetry arrives 1–3 turns
-late, so Blue rarely gets a strong enough signal in time. That's a finding, not
-a bug. Lower the latency or tune Blue (`agents/heuristic.py`: `INVESTIGATE_AT`,
-`CONTAIN_AT`, `SUSPICION_WINDOW`) and watch coverage climb.
+Out of the box, heuristic vs heuristic is roughly even. Over 300 games, Red wins
+about 46% on the default network and 41% on random ones, and mean coverage is
+around 50%. The defaults were tuned for that, so a new agent's win rate against
+either baseline means something. The biggest levers are `exfil_steps`
+(Blue's window), `telemetry_latency`, and Blue's `CONTAIN_AT` in
+`agents/heuristic.py`.
 
 ## Layout
 
@@ -144,7 +174,7 @@ purple_sim/
     env/
       models.py              # Node, Vulnerability, Action, TelemetryEvent
       attack_catalog.py      # MITRE ATT&CK technique labels
-      scenario.py            # default network + config
+      scenario.py            # default + random networks, config
       telemetry.py           # noisy/delayed Blue feed
       environment.py         # state machine, views, turn resolution
     agents/

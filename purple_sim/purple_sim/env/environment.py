@@ -17,6 +17,15 @@ Movement rules:
     into, and a Red foothold on it can't be pivoted from or exfiltrated from.
   - A re-imaging (RESTORE) node is offline for `restore_duration` Red turns,
     then comes back clean and un-isolated.
+  - EXFILTRATE takes `exfil_steps` turns on the crown jewel; a re-image wipes
+    the progress.
+  - PATCH closes a node's patchable vulnerabilities but takes it offline for
+    `patch_duration` Red turns (a maintenance window). Some vulnerabilities
+    (stolen credentials) can't be patched at all.
+
+Randomness comes from three independent streams (Red's action outcomes,
+telemetry detection/latency, benign noise), so two agents run on the same
+seed face the same luck wherever their choices coincide.
 """
 from __future__ import annotations
 
@@ -26,10 +35,12 @@ from typing import Callable, Dict, List, Optional, Union
 
 from .models import (Action, BlueActionType, EventKind, Faction, Node,
                      RedActionType, TelemetryEvent)
-from .scenario import DEFAULT_CONFIG, default_network
+from .scenario import DEFAULT_CONFIG, make_network
 from .telemetry import TelemetryBus
 
 BlueInput = Union[Action, Callable[[dict], Action]]
+
+HISTORY_IN_VIEW = 5  # how many of its own recent moves each side sees
 
 
 @dataclass
@@ -41,6 +52,7 @@ class StepResult:
     blue_outcome: str = ""
     new_events: List[TelemetryEvent] = field(default_factory=list)
     done: bool = False
+    red_feedback: str = ""            # what Red itself learns (no telemetry hints)
 
     # --- ground truth recorded for scoring (never shown to Blue) -------------
     red_executed: bool = False        # Red's action actually reached the network
@@ -64,12 +76,15 @@ class Environment:
     def __init__(self, network: Optional[Dict[str, Node]] = None,
                  config: Optional[dict] = None):
         self.config = {**DEFAULT_CONFIG, **(config or {})}
-        self.nodes: Dict[str, Node] = network or default_network()
-        self.rng = random.Random(self.config["seed"])
+        seed = self.config["seed"]
+        self.nodes: Dict[str, Node] = network or make_network(self.config["scenario"], seed)
+        self.rng = random.Random(f"{seed}:red")  # Red action outcomes
         self.bus = TelemetryBus(
-            rng=self.rng,
+            rng=random.Random(f"{seed}:telemetry"),
             latency=tuple(self.config["telemetry_latency"]),
             noise_per_step=self.config["noise_per_step"],
+            noise_rng=random.Random(f"{seed}:noise"),
+            lookalike_prob=self.config["lookalike_prob"],
         )
         self.step_count = 0
         self.max_steps = self.config["max_steps"]
@@ -80,6 +95,7 @@ class Environment:
         self.red = RedKnowledge()
         self.history: List[StepResult] = []
         self._compromised_at: Dict[str, int] = {}  # node -> step Red last took it
+        self.exfil_progress: Dict[str, int] = {}   # node -> EXFILTRATE turns completed
 
         # Red always starts knowing the internet-facing entry node exists.
         for name, node in self.nodes.items():
@@ -101,7 +117,7 @@ class Environment:
 
     def offline(self, name: str) -> bool:
         node = self.nodes[name]
-        return node.isolated or node.restoring > 0
+        return node.isolated or node.restoring > 0 or node.patching > 0
 
     def _has_route(self, name: str) -> bool:
         """Red has a network path to `name` (ignoring whether `name` itself is up)."""
@@ -141,6 +157,9 @@ class Environment:
                 "scanned": name in self.red.known_vulns,
                 "known_vulns": self.red.known_vulns.get(name, []),
             }
+        view["recent_actions"] = [
+            {"step": r.step, "action": str(r.red_action), "result": r.red_feedback}
+            for r in self.history[-HISTORY_IN_VIEW:]]
         return view
 
     def blue_view(self) -> dict:
@@ -155,10 +174,14 @@ class Environment:
                     "isolated": node.isolated,
                     "monitoring": round(node.monitoring, 2),
                     "restoring": node.restoring > 0,
+                    "patching": node.patching > 0,
                 }
                 for name, node in self.nodes.items()
             },
             "telemetry": [e.as_blue_view() for e in self.bus.visible_events()],
+            # Blue's own moves only — never their ground-truth outcome.
+            "recent_actions": [{"step": r.step, "action": str(r.blue_action)}
+                               for r in self.history[-HISTORY_IN_VIEW:]],
         }
 
     # --------------------------------------------------------------- resolution
@@ -209,6 +232,7 @@ class Environment:
                                           vuln.detection_prob + node.monitoring)
             if self.rng.random() <= vuln.success_prob:
                 self._compromise(target, rec)
+                rec.red_feedback = f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS."
                 seen = " (telemetry logged)" if logged else " (undetected)"
                 return f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS{seen}."
             return f"EXPLOIT {target} via {vuln.technique_id}: attempt failed."
@@ -244,9 +268,15 @@ class Environment:
                 return f"EXFILTRATE {target}: nothing valuable here."
             rec.red_executed, rec.red_technique = True, "T1048"
             self.bus.emit_attack(self.step_count, EventKind.EXFIL_DETECTED, target,
-                                 "T1048", 0.8 + node.monitoring)
+                                 "T1048", self.config["exfil_detection"] + node.monitoring)
             if self.offline(target):
                 return f"EXFILTRATE {target}: blocked — node is isolated/offline."
+            # Pulling a database out takes several turns; progress is lost on eviction.
+            self.exfil_progress[target] = self.exfil_progress.get(target, 0) + 1
+            needed = self.config["exfil_steps"]
+            if self.exfil_progress[target] < needed:
+                return f"EXFILTRATE {target}: transferring data "\
+                       f"({self.exfil_progress[target]}/{needed})."
             self.red_exfiltrated = True
             return f"EXFILTRATE {target}: CROWN JEWEL DATA STOLEN."
 
@@ -280,12 +310,15 @@ class Environment:
             return f"ISOLATE {target}: node cut off (availability impact)."
 
         if a == BlueActionType.PATCH.value:
-            if not node.open_vulns():
+            vulns = node.patchable_vulns()
+            if not vulns or node.patching > 0:
                 return f"PATCH {target}: nothing to patch (no-op)."
-            for v in node.vulnerabilities:
+            for v in vulns:
                 v.patched = True
+            node.patching = max(node.patching, self.config["patch_duration"])
             rec.blue_effective = True
-            return f"PATCH {target}: vulnerabilities closed."
+            return f"PATCH {target}: {len(vulns)} vulnerability(ies) closed "\
+                   f"(maintenance window)."
 
         if a == BlueActionType.RESTORE.value:
             if node.restoring > 0:
@@ -294,6 +327,7 @@ class Environment:
             was_compromised = node.compromised
             node.compromised = False
             self.red.footholds.discard(target)
+            self.exfil_progress.pop(target, None)
             rec.blue_effective = True
             tag = "evicted active intruder" if was_compromised else "no intruder found (wasted)"
             return f"RESTORE {target}: re-imaging ({tag})."
@@ -302,6 +336,8 @@ class Environment:
 
     def _tick_restores(self) -> None:
         for node in self.nodes.values():
+            if node.patching > 0:
+                node.patching -= 1
             if node.restoring > 0:
                 node.restoring -= 1
                 if node.restoring == 0:
@@ -329,8 +365,10 @@ class Environment:
         rec = StepResult(step=self.step_count, red_action=red_action, blue_action=None)
 
         rec.red_outcome = self._resolve_red(red_action, rec)
+        rec.red_feedback = rec.red_feedback or rec.red_outcome
         self._tick_restores()
-        self.bus.emit_noise(self.step_count, list(self.nodes.keys()))
+        self.bus.emit_noise(self.step_count, {name: self._node_technique(node)
+                                              for name, node in self.nodes.items()})
         rec.new_events = self.bus.advance(self.step_count)
 
         blue_action = blue(self.blue_view()) if callable(blue) else blue
