@@ -123,6 +123,20 @@ combination drives the attacker's win rate into the ground, but the order you
 spend in should depend on which regime you're in — and this model lets you tell
 which one that is.
 
+## Finding 5 — architecture matters as much as the defender
+
+The same competent defender (`SOCBlue`) on two postures (200 games each):
+
+| Network | Red win % |
+|---|---|
+| `enterprise` (segmented, EDR on key hosts) | 43 |
+| `flat` (one LAN, DB among the workstations, sparse EDR) | 86 |
+
+Segmentation plus sensor coverage roughly halves the attacker's success — the
+same analyst, a very different outcome. Picking the archetype (`--scenario
+enterprise` vs `flat`) closest to a real site, then editing it, is the fastest
+way to see which structural weakness costs the most.
+
 ## Caveats (read these)
 
 - **Representative, not real.** A made-up network. Treat the *shape* of the

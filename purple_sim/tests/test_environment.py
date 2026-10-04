@@ -557,6 +557,18 @@ def test_heuristic_red_reaches_admin_and_exfiltrates_sometimes():
     assert wins > 0   # the kill chain can actually complete
 
 
+def test_archetype_scenarios_build_and_terminate():
+    from purple_sim.env.scenario import SCENARIOS
+    for scenario in SCENARIOS:
+        env = Environment(config={"seed": 3, "scenario": scenario})
+        jewels = [n for n, node in env.nodes.items() if node.is_crown_jewel]
+        entries = [n for n, node in env.nodes.items() if node.is_entry]
+        assert len(jewels) == 1 and entries, scenario
+        report = Orchestrator(env, make_red("heuristic"), make_blue("soc"),
+                              SimConfig(verbose=False, show_report=False)).run()
+        assert report["winner"] in ("RED", "BLUE"), scenario
+
+
 def test_soc_blue_runs_and_respects_budget_and_ground_truth():
     env = Environment(config={"seed": 40, "analyst_budget": 6})
     report = Orchestrator(env, make_red("heuristic"), make_blue("soc"),

@@ -178,11 +178,21 @@ budget, so a trigger-happy Blue runs dry before the real intrusion lands.
 
 ### Scenarios
 
-`--scenario default` is the hand-built 4-node network in `env/scenario.py`.
-`--scenario random` generates a different network per seed: 1–2 entry nodes,
-3–6 internal hosts with cross-links (so there's usually more than one route),
-per-host sensor coverage (some with blind spots), and the crown jewel in the
-`secure` segment behind 1–2 internal hosts, never directly on the DMZ.
+Four scenarios, all in `env/scenario.py`:
+
+- `default` — the hand-built 4-node network.
+- `random` — a different seeded network per game: 1–2 entry nodes, 3–6 internal
+  hosts with cross-links, per-host sensor coverage (some blind spots), crown
+  jewel in the `secure` segment behind internal hosts.
+- `enterprise` — a 9-host multi-tier site (DMZ / internal identity+file+
+  workstation tier / segmented database) with realistic, uneven EDR coverage.
+- `flat` — a small-business "pancake": one DMZ host, everything else on one LAN
+  with the database among the workstations, sparse monitoring. A deliberately
+  weaker posture; compare it with `enterprise` to see what segmentation buys
+  (`ANALYSIS.md`, Finding 5).
+
+Pick the archetype closest to a real site and edit it to model that site; the
+model needs only shapes and sensor coverage, no secrets.
 
 ## Why the design choices matter
 

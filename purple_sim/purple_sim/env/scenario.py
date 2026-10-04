@@ -257,16 +257,56 @@ def enterprise_network() -> Dict[str, Node]:
     return {n.name: n for n in nodes}
 
 
-SCENARIOS = ("default", "random", "enterprise")
+def flat_network() -> Dict[str, Node]:
+    """A small-business 'pancake': one DMZ host, everything else on one flat
+    internal LAN with the database sitting right among the workstations, and
+    sparse endpoint monitoring. A deliberately weaker posture than `enterprise`
+    — no secure segment to cross, so compare the two to see what segmentation
+    and sensor coverage buy you.
+    """
+    def host(name, services, conns, net, edr, value=1, remote=None, entry=False,
+             jewel=False, segment="internal"):
+        vulns = [remote] if remote is not None else []
+        if entry:
+            vulns.append(_stolen_credentials(f"CRED-{name}"))
+        vulns.append(_privesc(f"PRIV-{name}"))
+        return Node(name=name, segment=segment, services=services, connections=conns,
+                    value=value, is_entry=entry, is_crown_jewel=jewel,
+                    sensors={Sensor.NETWORK: net, Sensor.ENDPOINT: edr}, vulnerabilities=vulns)
+
+    nodes = [
+        host("router", ["https"], ["lan_switch"], 0.6, 0.3, value=1, entry=True, segment="dmz",
+             remote=_remote("T1190", "Exploit Public-Facing Application", "CVE-FLAT-01",
+                            0.7, 0.4, "https")),
+        host("lan_switch", ["snmp"], ["router", "pc_1", "pc_2", "accounts_pc", "nas", "db"],
+             0.5, 0.0, value=1,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-FLAT-02",
+                            0.6, 0.4, "snmp")),
+        host("pc_1", ["smb"], ["lan_switch"], 0.4, 0.0, value=1,
+             remote=_remote("T1078", "Valid Accounts", "CVE-FLAT-03", 0.6, 0.3, "smb")),
+        host("pc_2", ["smb"], ["lan_switch"], 0.4, 0.0, value=1,
+             remote=_remote("T1078", "Valid Accounts", "CVE-FLAT-04", 0.6, 0.3, "smb")),
+        host("accounts_pc", ["smb", "rdp"], ["lan_switch"], 0.4, 0.2, value=3,
+             remote=_remote("T1078", "Valid Accounts", "CVE-FLAT-05", 0.6, 0.3, "rdp")),
+        host("nas", ["smb", "nfs"], ["lan_switch"], 0.5, 0.0, value=3,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-FLAT-06",
+                            0.6, 0.4, "smb")),
+        host("db", ["mysql"], ["lan_switch"], 0.5, 0.4, value=5, jewel=True,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-FLAT-07",
+                            0.55, 0.5, "mysql")),
+    ]
+    return {n.name: n for n in nodes}
+
+
+SCENARIOS = ("default", "random", "enterprise", "flat")
+_BUILDERS = {"default": default_network, "enterprise": enterprise_network, "flat": flat_network}
 
 
 def make_network(scenario: str, seed: int) -> Dict[str, Node]:
-    if scenario == "default":
-        return default_network()
     if scenario == "random":
         return random_network(seed)
-    if scenario == "enterprise":
-        return enterprise_network()
+    if scenario in _BUILDERS:
+        return _BUILDERS[scenario]()
     raise ValueError(f"Unknown scenario {scenario!r} (use one of {', '.join(SCENARIOS)})")
 
 
