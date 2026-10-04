@@ -54,6 +54,23 @@ def attack_events(env):
 
 
 # ----------------------------------------------------------------- basics
+def test_stats_intervals_and_significance():
+    from purple_sim.stats import (compare_proportions, mean_ci, pct_ci,
+                                   wilson_interval)
+    lo, hi = wilson_interval(50, 100)
+    assert lo < 0.5 < hi and 0.39 < lo < 0.41 and 0.59 < hi < 0.61   # ~[.40,.60]
+    assert wilson_interval(0, 10)[0] == 0.0 and wilson_interval(10, 10)[1] >= 0.999
+    assert wilson_interval(5, 0) == (0.0, 0.0)                        # no games
+    m, lo, hi = mean_ci([10, 10, 10])
+    assert m == 10 and lo == 10 and hi == 10                          # no variance
+    m, lo, hi = mean_ci([0, 10])
+    assert lo < m < hi
+    # 90/100 vs 60/100 is a real difference; 52 vs 48 is not.
+    assert compare_proportions(90, 100, 60, 100).significant
+    assert not compare_proportions(52, 100, 48, 100).significant
+    assert "%" in pct_ci(63, 100) and "[" in pct_ci(63, 100)
+
+
 def test_game_terminates():
     env = Environment(config={"seed": 1, "max_steps": 30})
     report = Orchestrator(env, make_red("heuristic"), make_blue("heuristic"),

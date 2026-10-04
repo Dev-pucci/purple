@@ -13,13 +13,13 @@ Examples
 from __future__ import annotations
 
 import argparse
-import statistics
 
 from .agents import make_blue, make_red
 from .agents.rl_interface import PurpleRedEnv, RandomRLAgent, train_notes
 from .env.environment import Environment
 from .env.scenario import SCENARIOS
 from .orchestrator import Orchestrator, SimConfig
+from .stats import mean_pm, pct_ci
 
 
 def _report_fallbacks(args, agents_turns) -> None:
@@ -91,14 +91,13 @@ def _batch(args) -> None:
             red_wins += 1
         else:
             blue_wins += 1
-    print(f"\n=== BATCH: {args.episodes} episodes, {args.scenario} scenario "
+    n = args.episodes
+    print(f"\n=== BATCH: {n} episodes, {args.scenario} scenario "
           f"({args.red} Red vs {args.blue} Blue) ===")
-    print(f"Red wins:  {red_wins}")
-    print(f"Blue wins: {blue_wins}")
-    print(f"Mean scores: Red {statistics.mean(red_scores):.1f}   "
-          f"Blue {statistics.mean(blue_scores):.1f}")
-    print(f"Mean Purple coverage: {statistics.mean(coverages):.1f}% "
-          f"(min {min(coverages):.0f} / max {max(coverages):.0f})")
+    print(f"Red win rate:  {pct_ci(red_wins, n)}   (95% CI)")
+    print(f"Blue win rate: {pct_ci(blue_wins, n)}")
+    print(f"Mean scores:   Red {mean_pm(red_scores)}   Blue {mean_pm(blue_scores)}")
+    print(f"Mean coverage: {mean_pm(coverages)}%")
     _report_fallbacks(args, [("Red", reds, turns), ("Blue", blues, turns)])
 
 

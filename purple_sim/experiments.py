@@ -22,6 +22,7 @@ from purple_sim.env.environment import Environment
 from purple_sim.env.models import Sensor
 from purple_sim.env.scenario import FIREWALL, make_network
 from purple_sim.orchestrator import Orchestrator, SimConfig
+from purple_sim.stats import compare_proportions, mean_pm, pct_ci
 
 BLUES = {"heuristic": HeuristicBlue, "soc": SOCBlue}
 SEED_BASE = 5000
@@ -52,8 +53,8 @@ def play(scenario, blue_cls, n, mutate=None, cfg_extra=None):
             host[row["node"]][1] += int(row["detected"])
             tech[row["technique"]][0] += 1
             tech[row["technique"]][1] += int(row["detected"])
-    return {"red_win": 100 * wins / n, "coverage": statistics.mean(covs),
-            "blue_score": statistics.mean(blues), "host": host, "tech": tech}
+    return {"wins": wins, "n": n, "red_win": 100 * wins / n, "coverages": covs,
+            "blue_scores": blues, "host": host, "tech": tech}
 
 
 def _cov(table, key):
@@ -63,18 +64,27 @@ def _cov(table, key):
 
 def study_defenders(args):
     print(f"\n# Defenders on the {args.scenario} network ({args.episodes} games each)")
-    print(f"{'defender':<12}{'Red win %':>11}{'Blue score':>12}{'coverage %':>12}")
+    print(f"{'defender':<12}{'Red win % [95% CI]':>22}{'Blue score':>16}{'coverage %':>16}")
+    results = {}
     for name, cls in BLUES.items():
         r = play(args.scenario, cls, args.episodes)
-        print(f"{name:<12}{r['red_win']:>11.0f}{r['blue_score']:>12.1f}{r['coverage']:>12.1f}")
+        results[name] = r
+        print(f"{name:<12}{pct_ci(r['wins'], r['n']):>22}{mean_pm(r['blue_scores']):>16}"
+              f"{mean_pm(r['coverages']):>16}")
+    h, s = results["heuristic"], results["soc"]
+    cmp = compare_proportions(h["wins"], h["n"], s["wins"], s["n"])
+    verdict = "significant" if cmp.significant else "NOT significant (overlapping)"
+    print(f"  soc vs heuristic Red-win difference: {100 * cmp.diff:+.0f} pts "
+          f"[{100 * cmp.lo:+.0f}, {100 * cmp.hi:+.0f}] - {verdict}")
 
 
 def study_posture(args):
     print(f"\n# Posture: same defender (soc), different architecture ({args.episodes} games)")
-    print(f"{'network':<12}{'Red win %':>11}{'Blue score':>12}{'coverage %':>12}")
+    print(f"{'network':<12}{'Red win % [95% CI]':>22}{'Blue score':>16}{'coverage %':>16}")
     for scenario in ("enterprise", "flat"):
         r = play(scenario, SOCBlue, args.episodes)
-        print(f"{scenario:<12}{r['red_win']:>11.0f}{r['blue_score']:>12.1f}{r['coverage']:>12.1f}")
+        print(f"{scenario:<12}{pct_ci(r['wins'], r['n']):>22}{mean_pm(r['blue_scores']):>16}"
+              f"{mean_pm(r['coverages']):>16}")
 
 
 def study_sensitivity(args):
@@ -97,12 +107,13 @@ def study_sensitivity(args):
     ]
     blue_cls = BLUES[args.blue]
     print(f"\n# Sensitivity on enterprise, {args.blue} defender ({args.episodes} games each)")
-    print(f"{'intervention':<26}{'Red win %':>11}{'coverage %':>12}{'workstn %':>11}")
+    print(f"{'intervention':<26}{'Red win % [95% CI]':>22}{'coverage %':>12}{'workstn %':>11}")
     for name, mut, cfg in rows:
         r = play("enterprise", blue_cls, args.episodes, mutate=mut, cfg_extra=cfg)
         ws = statistics.mean([_cov(r["host"], "workstation_eng"),
                               _cov(r["host"], "workstation_hr")])
-        print(f"{name:<26}{r['red_win']:>11.0f}{r['coverage']:>12.1f}{ws:>11.0f}")
+        print(f"{name:<26}{pct_ci(r['wins'], r['n']):>22}"
+              f"{statistics.mean(r['coverages']):>12.1f}{ws:>11.0f}")
 
 
 def main():
