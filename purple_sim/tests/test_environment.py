@@ -534,6 +534,22 @@ def test_blue_rl_env_runs_and_masks_are_valid():
     assert done
 
 
+def test_blue_rl_reward_sums_to_the_honest_blue_score():
+    # The learner optimises the real metric: summed step reward == final blue_score.
+    import random
+    from purple_sim.agents.blue_rl import PurpleBlueEnv
+    rng = random.Random(44)
+    env = PurpleBlueEnv(seed=44)
+    env.reset()
+    total, done = 0.0, False
+    while not done:
+        mask = env.action_mask()
+        idx = rng.choice([i for i, ok in enumerate(mask) if ok])
+        _, reward, done, _ = env.step(idx)
+        total += reward
+    assert abs(total - Scorer().final_report(env.env)["blue_score"]) < 1e-6
+
+
 def test_policy_blue_plays_in_the_orchestrator():
     from purple_sim.agents.blue_rl import PolicyBlue
     from purple_sim.env.scenario import default_network

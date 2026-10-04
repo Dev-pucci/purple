@@ -5,12 +5,16 @@ Red is a fixed policy (default: HeuristicRed). Blue sees only `blue_view()`
 (telemetry + observable availability), never ground truth, so the observation
 is built purely from what a real defender could know.
 
-Reward is zero-sum on Red's ground-truth position (evicting a foothold or
-denying the exfil lowers Red's score, which rewards Blue), minus a small
-penalty for every analyst point spent — so a good policy contains real
-intrusions without burning capacity or availability on noise. As with Red,
-training uses MaskablePPO; the mask marks only actions that are affordable and
-not obviously no-ops from what Blue can see.
+Reward **is** the honest Blue score, paid out per step: +TRUE_POSITIVE_REWARD
+for containing a genuinely compromised host, -FALSE_POSITIVE_PENALTY for
+containing a healthy one, -DOWNTIME_PENALTY for every node-step offline, and
+-EXFIL_BONUS if Red steals the data. (An earlier version rewarded only "lower
+Red's score minus a small waste penalty"; the agent reward-hacked it into
+scorched-earth — isolate/re-image everything, win every game at 0% coverage and
+a terrible availability cost. Training against the real objective fixes that.)
+
+As with Red, training uses MaskablePPO; the mask marks only actions that are
+affordable and not obviously no-ops from what Blue can see.
 """
 from __future__ import annotations
 
@@ -24,8 +28,8 @@ from .base import BlueAgent, RedAgent
 from .heuristic import HeuristicRed
 
 ANALYST_COST = {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3}
-WASTE_PENALTY = 0.4         # per analyst point actually spent
 ALERT_WINDOW = 10          # steps of telemetry folded into the observation
+CONTAINMENT = ("ISOLATE", "RESTORE")
 SEVERITY = {"EXFIL_DETECTED": 5, "PRIVESC_DETECTED": 4, "LATERAL_DETECTED": 4,
             "EXPLOIT_ATTEMPT": 2, "SCAN_DETECTED": 1}
 _ACTIONS = (BlueActionType.INVESTIGATE, BlueActionType.PATCH,
@@ -152,14 +156,17 @@ class PurpleBlueEnv:
         assert self.env is not None, "Call reset() first."
         blue_action = self.action_table[action_index % len(self.action_table)]
         red_action = self.red.act(self.env.red_view())
-
-        before = self._scorer.score_state(self.env)
         result = self.env.step(red_action, blue_action)
-        after = self._scorer.score_state(self.env)
 
-        reward = float(before["red"] - after["red"])   # Red losing ground rewards Blue
-        if result.blue_effective:
-            reward -= WASTE_PENALTY * ANALYST_COST.get(blue_action.type, 0)
+        # Reward = the honest Blue score, paid incrementally (summing it over a
+        # game reproduces Scorer.final_report's blue_score).
+        sc = self._scorer
+        reward = -sc.DOWNTIME_PENALTY * result.offline_nodes
+        if result.blue_effective and blue_action.type in CONTAINMENT:
+            reward += (sc.TRUE_POSITIVE_REWARD if result.blue_target_compromised
+                       else -sc.FALSE_POSITIVE_PENALTY)
+        if self.env.red_exfiltrated:
+            reward -= sc.EXFIL_BONUS
         info = {"red_outcome": result.red_outcome, "blue_outcome": result.blue_outcome,
                 "winner": self.env.winner}
         return self._encode_obs(), reward, result.done, info
