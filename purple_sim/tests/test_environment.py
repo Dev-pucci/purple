@@ -276,6 +276,18 @@ def test_some_noise_looks_like_an_attack_but_is_a_false_positive():
             assert e.technique_id == env.nodes[e.node].vulnerabilities[0].technique_id
 
 
+def test_a_host_without_a_sensor_never_raises_that_sensors_alerts():
+    # Default workstation has no ENDPOINT sensor: no EDR alerts from it, benign or not.
+    env = Environment(config={"seed": 32, "noise_per_step": 6, "lookalike_prob": 1.0,
+                              "max_steps": 30})
+    while not env.done:
+        env.step(WAIT, MONITOR)
+    ws = [e for e in env.bus.visible_events() if e.node == "workstation"]
+    assert ws, "expected some (network) noise on the workstation"
+    assert not any(e.sensor == "ENDPOINT" for e in ws)
+    assert any(e.sensor == "ENDPOINT" for e in env.bus.visible_events())  # others still do
+
+
 # ----------------------------------------------------------------- scoring / coverage
 def test_coverage_counts_only_responses_after_the_event_is_visible():
     cfg = {"seed": 15, "telemetry_latency": (2, 2), "noise_per_step": 0, "analyst_budget": 0}

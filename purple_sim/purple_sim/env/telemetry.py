@@ -65,23 +65,33 @@ class TelemetryBus:
         ))
         return True
 
-    def emit_noise(self, step: int, exploit_techniques: Dict[str, str]) -> None:
+    def emit_noise(self, step: int, exploit_techniques: Dict[str, str],
+                   coverage: Optional[Dict[str, Dict[str, float]]] = None) -> None:
         """Inject benign events so Blue cannot treat 'any event' as an attack.
 
         `exploit_techniques` maps every node to the technique an exploit
-        look-alike on that node should carry.
+        look-alike on that node should carry. `coverage` maps node -> sensor ->
+        coverage: a look-alike can only come from a sensor the host actually
+        has (no EDR, no EDR alerts — benign or not), weighted by its coverage.
+        Without it, every sensor is treated as fully present.
         """
         rng = self.noise_rng
         nodes = list(exploit_techniques)
-        kinds = list(LOOKALIKE_NOISE)
-        weights = list(LOOKALIKE_NOISE.values())
         for _ in range(self.noise_per_step):
             node = rng.choice(nodes)
             kind, technique, sensor = EventKind.BENIGN_NOISE, "", ""
             if rng.random() < self.lookalike_prob:
-                kind = rng.choices(kinds, weights)[0]
-                technique = _LOOKALIKE_TECHNIQUE.get(kind, exploit_techniques[node])
-                sensor = EVENT_SENSOR[kind].value
+                kinds, weights = [], []
+                for k, w in LOOKALIKE_NOISE.items():
+                    cov = 1.0 if coverage is None else \
+                        coverage.get(node, {}).get(EVENT_SENSOR[k].value, 0.0)
+                    if cov > 0:
+                        kinds.append(k)
+                        weights.append(w * cov)
+                if kinds:
+                    kind = rng.choices(kinds, weights)[0]
+                    technique = _LOOKALIKE_TECHNIQUE.get(kind, exploit_techniques[node])
+                    sensor = EVENT_SENSOR[kind].value
             self._pending.append(TelemetryEvent(
                 step_emitted=step,
                 visible_at=step + self._latency(rng),

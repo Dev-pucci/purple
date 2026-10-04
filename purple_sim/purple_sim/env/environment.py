@@ -474,8 +474,9 @@ class Environment:
         rec.red_outcome = self._resolve_red(red_action, rec)
         rec.red_feedback = rec.red_feedback or rec.red_outcome
         self._tick_restores()
-        self.bus.emit_noise(self.step_count, {name: self._node_technique(node)
-                                              for name, node in self.nodes.items()})
+        self.bus.emit_noise(self.step_count,
+                            {name: self._node_technique(node) for name, node in self.nodes.items()},
+                            {name: dict(node.sensors) for name, node in self.nodes.items()})
         rec.new_events = self.bus.advance(self.step_count)
 
         blue_action = blue(self.blue_view()) if callable(blue) else blue
