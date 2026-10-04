@@ -257,6 +257,9 @@ class Environment:
     def _resolve_red(self, action: Action, rec: StepResult) -> str:
         a = action.type
         target = action.params.get("target", "")
+        stealth = action.params.get("mode") == "stealth"
+        succ_mult = self.config["stealth_success_mult"] if stealth else 1.0
+        det_mult = self.config["stealth_detection_mult"] if stealth else 1.0
 
         if a == RedActionType.WAIT.value:
             return "Red lies low (no action)."
@@ -297,11 +300,13 @@ class Environment:
                 return f"EXPLOIT {target}: no open remote vulnerabilities (patched)."
             vuln = max(vulns, key=lambda v: v.success_prob)
             rec.red_executed, rec.red_technique = True, vuln.technique_id
-            self._emit(EventKind.EXPLOIT_ATTEMPT, node, vuln.technique_id, vuln.detection_prob)
-            if self.rng.random() <= vuln.success_prob:
+            self._emit(EventKind.EXPLOIT_ATTEMPT, node, vuln.technique_id,
+                       vuln.detection_prob * det_mult)
+            if self.rng.random() <= vuln.success_prob * succ_mult:
                 self._grant(target, vuln.grants, rec)
                 lvl = AccessLevel(self.nodes[target].access).name
-                rec.red_feedback = f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS ({lvl})."
+                how = " quietly" if stealth else ""
+                rec.red_feedback = f"EXPLOIT {target} via {vuln.technique_id}: SUCCESS{how} ({lvl})."
                 return rec.red_feedback
             return f"EXPLOIT {target} via {vuln.technique_id}: attempt failed."
 
@@ -317,11 +322,11 @@ class Environment:
             rec.red_executed, rec.red_technique = True, "T1068"
             self._emit(EventKind.PRIVESC_DETECTED, node,
                        locals_[0].technique_id if locals_ else "T1068",
-                       self.config["escalate_detection"])
+                       self.config["escalate_detection"] * det_mult)
             if not locals_:
                 return f"ESCALATE {target}: no local privilege-escalation vector (patched)."
             vuln = max(locals_, key=lambda v: v.success_prob)
-            if self.rng.random() <= vuln.success_prob:
+            if self.rng.random() <= vuln.success_prob * succ_mult:
                 node.access = AccessLevel.ADMIN
                 rec.red_feedback = f"ESCALATE {target} via {vuln.technique_id}: now ADMIN."
                 return rec.red_feedback
@@ -347,10 +352,10 @@ class Environment:
             self.red.discovered.add(target)
             rec.red_executed, rec.red_technique = True, "T1021"
             self._emit(EventKind.LATERAL_DETECTED, node, "T1021",
-                       self.config["lateral_detection"])
+                       self.config["lateral_detection"] * det_mult)
             if self.offline(target):
                 return f"LATERAL_MOVE {src}->{target}: blocked — node is isolated/offline."
-            if self.rng.random() <= self.config["lateral_success"]:
+            if self.rng.random() <= self.config["lateral_success"] * succ_mult:
                 self._grant(target, AccessLevel.USER, rec)
                 rec.red_feedback = f"LATERAL_MOVE {src}->{target}: SUCCESS, hold {target} (USER)."
                 return rec.red_feedback
@@ -365,7 +370,8 @@ class Environment:
             if node.access < AccessLevel.ADMIN:
                 return f"EXFILTRATE {target}: need ADMIN here first (ESCALATE)."
             rec.red_executed, rec.red_technique = True, "T1048"
-            self._emit(EventKind.EXFIL_DETECTED, node, "T1048", self.config["exfil_detection"])
+            self._emit(EventKind.EXFIL_DETECTED, node, "T1048",
+                       self.config["exfil_detection"] * det_mult)
             if self.offline(target):
                 return f"EXFILTRATE {target}: blocked — node is isolated/offline."
             self.exfil_progress[target] = self.exfil_progress.get(target, 0) + 1

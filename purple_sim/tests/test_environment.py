@@ -276,6 +276,29 @@ def test_some_noise_looks_like_an_attack_but_is_a_false_positive():
             assert e.technique_id == env.nodes[e.node].vulnerabilities[0].technique_id
 
 
+def test_stealth_mode_trades_success_for_lower_detection():
+    def rates(stealth, n=300):
+        logged = succ = 0
+        for s in range(n):
+            env = Environment(config={"seed": 1000 + s, "noise_per_step": 0})
+            mark_scanned(env, "web_dmz")
+            v = env.nodes["web_dmz"].remote_vulns()[0]
+            v.success_prob, v.detection_prob = 0.8, 1.0
+            env.nodes["web_dmz"].sensors[Sensor.ENDPOINT] = 1.0
+            params = {"target": "web_dmz"}
+            if stealth:
+                params["mode"] = "stealth"
+            env.step(red("EXPLOIT", **params), MONITOR)
+            logged += any(e.node == "web_dmz" and e.kind == "EXPLOIT_ATTEMPT"
+                          for e in attack_events(env))
+            succ += "SUCCESS" in env.history[0].red_feedback
+        return logged / n, succ / n
+    loud_logged, loud_succ = rates(False)
+    quiet_logged, quiet_succ = rates(True)
+    assert quiet_logged < loud_logged - 0.3     # much quieter
+    assert quiet_succ < loud_succ               # but less reliable
+
+
 def test_a_host_without_a_sensor_never_raises_that_sensors_alerts():
     # Default workstation has no ENDPOINT sensor: no EDR alerts from it, benign or not.
     env = Environment(config={"seed": 32, "noise_per_step": 6, "lookalike_prob": 1.0,

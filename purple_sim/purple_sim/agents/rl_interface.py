@@ -29,12 +29,18 @@ INVALID_ACTION_PENALTY = 0.1  # nudges the learner off moves that do nothing
 
 def build_action_table(network: Dict[str, Node]) -> List[Action]:
     """Every Red move on this network: WAIT, then per node SCAN / EXPLOIT /
-    ESCALATE / EXFILTRATE and a LATERAL_MOVE along each edge."""
+    ESCALATE / EXFILTRATE and a LATERAL_MOVE along each edge, plus quiet
+    (mode="stealth") variants of EXPLOIT and EXFILTRATE — the detection-critical
+    steps — so a learner can trade success odds for stealth."""
     table = [Action(Faction.RED, RedActionType.WAIT.value, {})]
     for name in sorted(network):
         for kind in (RedActionType.SCAN, RedActionType.EXPLOIT,
                      RedActionType.ESCALATE, RedActionType.EXFILTRATE):
             table.append(Action(Faction.RED, kind.value, {"target": name}))
+        table.append(Action(Faction.RED, RedActionType.EXPLOIT.value,
+                            {"target": name, "mode": "stealth"}))
+        table.append(Action(Faction.RED, RedActionType.EXFILTRATE.value,
+                            {"target": name, "mode": "stealth"}))
         for neigh in network[name].connections:
             table.append(Action(Faction.RED, RedActionType.LATERAL_MOVE.value,
                                 {"source": name, "target": neigh}))

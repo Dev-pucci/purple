@@ -286,6 +286,8 @@ DEFAULT_CONFIG = {
     "lateral_detection": 0.4,      # base chance a LATERAL_MOVE shows up in telemetry
     "exfil_steps": 3,              # EXFILTRATE turns needed to steal the crown jewel
     "exfil_detection": 0.8,        # base chance each EXFILTRATE turn is logged
+    "stealth_success_mult": 0.55,  # mode="stealth": multiplies an action's success odds
+    "stealth_detection_mult": 0.3, # mode="stealth": multiplies its detection odds (quieter)
     "analyst_budget": 50,          # total action-points Blue may spend across a game (0 = unlimited)
     "analyst_costs": {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3},
 }

@@ -146,6 +146,8 @@ class Action:
             bits.append(f"{src}->{tgt}" if src else tgt)
         if tech:
             bits.append(f"({tech})")
+        if self.params.get("mode") == "stealth":
+            bits.append("[stealth]")
         return " ".join(bits)
 
 
