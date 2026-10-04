@@ -42,16 +42,27 @@ _policy_cache: dict = {}
 def _make_red(args):
     if args.red != "rl":
         return make_red(args.red, mock=not args.live)
-    if args.rl_model not in _policy_cache:  # load the model once per run
+    key = ("red", args.rl_model)
+    if key not in _policy_cache:  # load the model once per run
         from .agents.gym_env import load_policy_red  # needs gymnasium + stable-baselines3
-        _policy_cache[args.rl_model] = load_policy_red(args.rl_model)
-    return _policy_cache[args.rl_model]
+        _policy_cache[key] = load_policy_red(args.rl_model)
+    return _policy_cache[key]
+
+
+def _make_blue(args):
+    if args.blue != "rl":
+        return make_blue(args.blue, mock=not args.live)
+    key = ("blue", args.rl_blue_model)
+    if key not in _policy_cache:
+        from .agents.gym_env import load_policy_blue
+        _policy_cache[key] = load_policy_blue(args.rl_blue_model)
+    return _policy_cache[key]
 
 
 def _single(args) -> dict:
     env = _env(args, args.seed)
     red = _make_red(args)
-    blue = make_blue(args.blue, mock=not args.live)
+    blue = _make_blue(args)
     orch = Orchestrator(env, red, blue,
                         SimConfig(verbose=not args.quiet, color=not args.no_color,
                                   show_report=True))
@@ -67,7 +78,7 @@ def _batch(args) -> None:
     for i in range(args.episodes):
         env = _env(args, args.seed + i)
         red = _make_red(args)
-        blue = make_blue(args.blue, mock=not args.live)
+        blue = _make_blue(args)
         report = Orchestrator(env, red, blue,
                               SimConfig(verbose=False, show_report=False)).run()
         reds.append(red)
@@ -101,7 +112,7 @@ def _analyze(args) -> None:
     red_wins = 0
     for i in range(episodes):
         env = _env(args, args.seed + i)
-        report = Orchestrator(env, _make_red(args), make_blue(args.blue, mock=not args.live),
+        report = Orchestrator(env, _make_red(args), _make_blue(args),
                               SimConfig(verbose=False, show_report=False)).run()
         red_wins += report["winner"] == "RED"
         for row in report["coverage_rows"]:
@@ -145,7 +156,9 @@ def main(argv=None) -> None:
     p.add_argument("--red", default="heuristic", choices=["heuristic", "llm", "rl"])
     p.add_argument("--rl-model", default="models/ppo_red.zip",
                    help="Trained PPO model for --red rl (see train_rl.py).")
-    p.add_argument("--blue", default="heuristic", choices=["heuristic", "soc", "llm"])
+    p.add_argument("--blue", default="heuristic", choices=["heuristic", "soc", "llm", "rl"])
+    p.add_argument("--rl-blue-model", default="models/ppo_blue.zip",
+                   help="Trained model for --blue rl (see train_rl.py --side blue).")
     p.add_argument("--live", action="store_true",
                    help="Use the real Claude API for LLM agents (needs ANTHROPIC_API_KEY).")
     p.add_argument("--episodes", type=int, default=1, help="Run N games and average.")
@@ -158,8 +171,8 @@ def main(argv=None) -> None:
     p.add_argument("--analyze", action="store_true",
                    help="Aggregate a per-host / per-technique blind-spot map over many games.")
     args = p.parse_args(argv)
-    if args.red == "rl" and args.scenario != "default":
-        p.error("--red rl is trained on the default network; use --scenario default.")
+    if "rl" in (args.red, args.blue) and args.scenario != "default":
+        p.error("--red/--blue rl are trained on the default network; use --scenario default.")
 
     if args.rl_demo:
         _rl_demo(args)

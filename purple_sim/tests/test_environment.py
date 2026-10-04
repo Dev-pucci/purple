@@ -489,11 +489,38 @@ def test_every_unmasked_move_reaches_the_network():
 def test_gym_adapter_passes_gymnasium_checks():
     try:
         from gymnasium.utils.env_checker import check_env
-        from purple_sim.agents.gym_env import GymRedEnv
+        from purple_sim.agents.gym_env import GymBlueEnv, GymRedEnv
     except ImportError:
         print("  (skipped: gymnasium not installed)")
         return
     check_env(GymRedEnv(seed=29), skip_render_check=True)
+    check_env(GymBlueEnv(seed=29), skip_render_check=True)
+
+
+def test_blue_rl_env_runs_and_masks_are_valid():
+    from purple_sim.agents.blue_rl import PurpleBlueEnv
+    env = PurpleBlueEnv(seed=41)
+    obs = env.reset()
+    assert len(obs) == env.obs_dim
+    done, steps = False, 0
+    while not done and steps < 200:
+        mask = env.action_mask()
+        assert mask[0] and any(mask)          # MONITOR always available
+        obs, reward, done, info = env.step(mask.index(True))
+        steps += 1
+    assert done
+
+
+def test_policy_blue_plays_in_the_orchestrator():
+    from purple_sim.agents.blue_rl import PolicyBlue
+    from purple_sim.env.scenario import default_network
+    # A policy that always MONITORs (index 0) should let Red win eventually.
+    passive = PolicyBlue(lambda obs, mask: 0, default_network(), budget_on=True)
+    env = Environment(config={"seed": 42})
+    report = Orchestrator(env, make_red("heuristic"), passive,
+                          SimConfig(verbose=False, show_report=False)).run()
+    assert report["winner"] in ("RED", "BLUE")
+    assert all(h.blue_action.type == "MONITOR" for h in env.history)
 
 
 # ----------------------------------------------------------------- agents
