@@ -189,7 +189,75 @@ def random_network(seed: int, internal: Optional[int] = None) -> Dict[str, Node]
     return nodes
 
 
-SCENARIOS = ("default", "random")
+# ----------------------------------------------- representative enterprise network
+def _remote(technique: str, name: str, label: str, success: float, detection: float,
+           service: str) -> Vulnerability:
+    return Vulnerability(technique, name, label, success, detection, service=service,
+                         grants=AccessLevel.USER)
+
+
+def enterprise_network() -> Dict[str, Node]:
+    """A hand-built, multi-tier enterprise to model a real site against.
+
+    Edit this to match your environment (segments, host roles, which hosts have
+    EDR, where the data sits). It reuses the FIREWALL policy below. Shape:
+
+        internet
+          |                               [internal]
+      [dmz] web_proxy --- app_server --- domain_controller --- workstation_eng
+            vpn_gateway -- jump_host  \\-- file_server --------- workstation_hr
+                              |            |
+                              +-- app_server --- db_cluster*  [secure] (* crown jewel)
+    """
+    def host(name, segment, services, conns, net, edr, value=1, remote=None,
+             entry=False, jewel=False):
+        vulns = []
+        if remote is not None:
+            vulns.append(remote)
+        if entry:
+            vulns.append(_stolen_credentials(f"CRED-{name}"))
+        vulns.append(_privesc(f"PRIV-{name}"))
+        return Node(name=name, segment=segment, services=services, connections=conns,
+                    value=value, is_entry=entry, is_crown_jewel=jewel,
+                    sensors={Sensor.NETWORK: net, Sensor.ENDPOINT: edr},
+                    vulnerabilities=vulns)
+
+    nodes = [
+        host("web_proxy", "dmz", ["https"], ["app_server"], 0.8, 0.6, value=1, entry=True,
+             remote=_remote("T1190", "Exploit Public-Facing Application", "CVE-ENT-01",
+                            0.7, 0.5, "https")),
+        host("vpn_gateway", "dmz", ["vpn"], ["jump_host"], 0.7, 0.5, value=1, entry=True,
+             remote=_remote("T1190", "Exploit Public-Facing Application", "CVE-ENT-02",
+                            0.6, 0.5, "vpn")),
+        host("app_server", "internal", ["http", "rpc"],
+             ["web_proxy", "jump_host", "domain_controller", "db_cluster"], 0.7, 0.7, value=2,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-ENT-03",
+                            0.6, 0.5, "rpc")),
+        host("jump_host", "internal", ["ssh", "rdp"], ["vpn_gateway", "app_server", "file_server"],
+             0.7, 0.6, value=2,
+             remote=_remote("T1021", "Remote Services", "CVE-ENT-04", 0.55, 0.5, "rdp")),
+        host("domain_controller", "internal", ["ldap", "kerberos"],
+             ["app_server", "file_server", "workstation_eng", "workstation_hr"], 0.8, 0.9, value=4,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-ENT-05",
+                            0.5, 0.6, "ldap")),
+        host("file_server", "internal", ["smb"],
+             ["jump_host", "domain_controller", "workstation_eng", "workstation_hr"], 0.6, 0.4,
+             value=2, remote=_remote("T1210", "Exploitation of Remote Services", "CVE-ENT-06",
+                                     0.6, 0.45, "smb")),
+        host("workstation_eng", "internal", ["smb", "rdp"],
+             ["domain_controller", "file_server"], 0.5, 0.0, value=1,
+             remote=_remote("T1078", "Valid Accounts", "CVE-ENT-07", 0.55, 0.35, "rdp")),
+        host("workstation_hr", "internal", ["smb"], ["domain_controller", "file_server"],
+             0.5, 0.0, value=1,
+             remote=_remote("T1078", "Valid Accounts", "CVE-ENT-08", 0.55, 0.35, "smb")),
+        host("db_cluster", "secure", ["postgresql"], ["app_server"], 0.8, 0.9, value=5, jewel=True,
+             remote=_remote("T1210", "Exploitation of Remote Services", "CVE-ENT-09",
+                            0.5, 0.7, "postgresql")),
+    ]
+    return {n.name: n for n in nodes}
+
+
+SCENARIOS = ("default", "random", "enterprise")
 
 
 def make_network(scenario: str, seed: int) -> Dict[str, Node]:
@@ -197,6 +265,8 @@ def make_network(scenario: str, seed: int) -> Dict[str, Node]:
         return default_network()
     if scenario == "random":
         return random_network(seed)
+    if scenario == "enterprise":
+        return enterprise_network()
     raise ValueError(f"Unknown scenario {scenario!r} (use one of {', '.join(SCENARIOS)})")
 
 

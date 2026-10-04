@@ -8,6 +8,7 @@ Examples
   python -m purple_sim.cli --episodes 20 --quiet   # batch run, averaged coverage
   python -m purple_sim.cli --rl-demo               # random RL agent on the gym env
   python -m purple_sim.cli --red rl --rl-model models/ppo_red.zip  # trained PPO Red
+  python -m purple_sim.cli --analyze --scenario enterprise  # blind-spot map for a network
 """
 from __future__ import annotations
 
@@ -90,6 +91,39 @@ def _batch(args) -> None:
     _report_fallbacks(args, [("Red", reds, turns), ("Blue", blues, turns)])
 
 
+def _analyze(args) -> None:
+    """Aggregate a Purple blind-spot map over many games: for each host and each
+    technique, how often Red's real attack steps there were detected + responded to."""
+    from collections import defaultdict
+    episodes = max(args.episodes, 50)
+    by_host = defaultdict(lambda: [0, 0])       # node -> [executed, detected]
+    by_tech = defaultdict(lambda: [0, 0])
+    red_wins = 0
+    for i in range(episodes):
+        env = _env(args, args.seed + i)
+        report = Orchestrator(env, _make_red(args), make_blue(args.blue, mock=not args.live),
+                              SimConfig(verbose=False, show_report=False)).run()
+        red_wins += report["winner"] == "RED"
+        for row in report["coverage_rows"]:
+            for table, key in ((by_host, row["node"]), (by_tech, row["technique"])):
+                table[key][0] += 1
+                table[key][1] += int(row["detected"])
+
+    def fmt(table, title, label):
+        print(f"\n{title}")
+        print(f"  {label:<20}{'attack steps':>13}{'detected':>10}{'coverage':>10}")
+        for key in sorted(table, key=lambda k: table[k][1] / max(table[k][0], 1)):
+            ex, det = table[key]
+            flag = "  <-- blind spot" if ex >= 5 and det / ex < 0.25 else ""
+            print(f"  {key:<20}{ex:>13}{det:>10}{det / ex * 100:>9.0f}%{flag}")
+
+    print(f"=== BLIND-SPOT MAP: {episodes} games on the {args.scenario} network "
+          f"({args.red} Red vs {args.blue} Blue) ===")
+    print(f"Red win rate: {red_wins / episodes * 100:.0f}%")
+    fmt(by_host, "By host - where attacks land without a response:", "host")
+    fmt(by_tech, "By technique - which ATT&CK steps slip through:", "technique")
+
+
 def _rl_demo(args) -> None:
     env = PurpleRedEnv(seed=args.seed)
     agent = RandomRLAgent(env, seed=args.seed)
@@ -121,12 +155,16 @@ def main(argv=None) -> None:
     p.add_argument("--quiet", action="store_true", help="Suppress per-turn trace.")
     p.add_argument("--no-color", action="store_true")
     p.add_argument("--rl-demo", action="store_true", help="Run the Gym-style RL demo.")
+    p.add_argument("--analyze", action="store_true",
+                   help="Aggregate a per-host / per-technique blind-spot map over many games.")
     args = p.parse_args(argv)
     if args.red == "rl" and args.scenario != "default":
         p.error("--red rl is trained on the default network; use --scenario default.")
 
     if args.rl_demo:
         _rl_demo(args)
+    elif args.analyze:
+        _analyze(args)
     elif args.episodes > 1:
         _batch(args)
     else:
