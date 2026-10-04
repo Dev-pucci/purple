@@ -1,0 +1,2 @@
+[console_scripts]
+purple-sim = purple_sim.cli:main

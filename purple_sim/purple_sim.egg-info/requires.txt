@@ -1,0 +1,11 @@
+
+[dev]
+pytest>=7.0
+
+[llm]
+anthropic>=0.39
+
+[rl]
+gymnasium>=1.0
+stable-baselines3>=2.4
+sb3-contrib>=2.4

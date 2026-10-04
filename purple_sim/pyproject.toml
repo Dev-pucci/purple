@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "purple-sim"
+version = "0.2.0"
+description = "Abstract Red-vs-Blue (purple team) network simulation for measuring detection coverage honestly."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["security", "purple-team", "simulation", "mitre-attack", "reinforcement-learning"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Information Technology",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3",
+]
+# The core simulation, scripted agents, scenarios, analysis and JSON I/O are
+# pure standard library — no runtime dependencies.
+dependencies = []
+
+[project.optional-dependencies]
+# Live LLM agents (`--live`).
+llm = ["anthropic>=0.39"]
+# Training and running RL agents (`train_rl.py`, `--red/--blue rl`).
+rl = ["gymnasium>=1.0", "stable-baselines3>=2.4", "sb3-contrib>=2.4"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+purple-sim = "purple_sim.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Dev-pucci/purple"
+
+[tool.setuptools]
+packages = ["purple_sim", "purple_sim.env", "purple_sim.agents", "purple_sim.scoring"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

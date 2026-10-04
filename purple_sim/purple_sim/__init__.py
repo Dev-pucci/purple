@@ -15,4 +15,4 @@ Nothing here touches a real network. Vulnerabilities are abstract flags and
 "CVE"/technique labels are just strings used for scoring and vocabulary.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
