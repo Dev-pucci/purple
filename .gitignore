@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 purple_sim/models/
+.claude/settings.local.json
