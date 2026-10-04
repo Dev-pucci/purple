@@ -96,15 +96,18 @@ agent in the orchestrator.
   fixed node set, so RL uses the default scenario.
 
 Reference result (`train_rl.py`, 300 held-out games vs the heuristic Blue,
-default network): MaskablePPO Red ~39% wins, heuristic Red ~37%, random
-valid-move Red ~0%. On this deeper model the full chain
-(scan → exploit → escalate → pivot → exfil) is long and sparsely rewarded, and
-PPO **plateaus level with the scripted baseline** — 600k and 1.5M steps gave
-the same ~39%, so more compute isn't the lever. Beating the heuristic clearly
-here is an open problem: it likely needs reward shaping for the intermediate
-steps (reaching ADMIN, crossing into `secure`) or a recurrent policy, not just
-longer runs. `train_rl.py` prints the table so you can see where your run
-landed.
+default network): MaskablePPO Red ~38% wins, heuristic Red ~36%, random
+valid-move Red ~0%. RL clearly learns the chain (far above random) and
+consistently edges the scripted Red by a few points while being comparably
+stealthy — but it **plateaus there**. 600k steps, 1.5M steps, and
+potential-based milestone shaping (`--shaping`, rewards for reaching ADMIN and
+breaking into `secure`) all land at ~38%. The most likely reason is that the
+forced kill chain (scan → exploit → escalate → pivot → exfil) leaves little
+room for cleverness, so the greedy scripted Red is already near the achievable
+ceiling for this environment — RL matching it is the expected result, not a
+training failure. More headroom would need a richer action space (timing,
+stealth choices, decoys) rather than more compute. `train_rl.py` prints the
+table so you can see where your run landed.
 
 ## How a turn works
 
@@ -275,9 +278,9 @@ purple_sim/
 
 - Add more techniques/nodes in `scenario.py` and `attack_catalog.py`.
 - Flip LLM agents to `--live` and compare their coverage against the heuristics.
-- Get RL Red clearly past the heuristic: reward-shape the intermediate chain
-  (reaching ADMIN, crossing into `secure`) or try a recurrent policy — more
-  steps alone plateau at ~39%.
+- Give Red more room to be clever (action timing, stealth vs. speed choices,
+  decoys) so there's headroom above the scripted kill chain — more compute and
+  reward shaping both plateau at ~38% because the chain is near-forced.
 - Compare defenders: `--blue soc` (recency/severity, correlation, budget
   discipline) clearly beats `--blue heuristic` — see `ANALYSIS.md`.
 - Train an RL Blue against the PPO Red and alternate (self-play).
