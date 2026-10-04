@@ -197,10 +197,17 @@ class Environment:
         the sensor coverage — that is the point of a tripwire.
         """
         if node.decoy:
-            prob = 1.0
+            prob = 1.0  # a canary bypasses coverage gaps and alert fatigue alike
         else:
             coverage = node.sensor_coverage(EVENT_SENSOR[kind].value)
             prob = min(1.0, base * coverage + node.monitoring)
+            fatigue = self.config["alert_fatigue"]
+            if fatigue > 0:
+                # Signal drowns in noise: the more alerts already in the feed,
+                # the more likely a real one is missed.
+                load = min(1.0, len(self.bus.working_events(self.step_count))
+                           / max(1, self.config["fatigue_capacity"]))
+                prob *= (1.0 - fatigue * load)
         return self.bus.emit_attack(self.step_count, kind, node.name, technique, prob)
 
     def _grant(self, name: str, level: int, rec: StepResult) -> None:

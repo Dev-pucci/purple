@@ -66,6 +66,7 @@ environment, so you can mix and match.
 | Family | Where | Needs |
 |---|---|---|
 | **Heuristic** | `agents/heuristic.py`, `agents/soc.py` | nothing — deterministic baselines: `heuristic`, the budget-aware `soc`, and `adaptive` (canaries + credential rotation) Blue |
+| **Scripted Red** | `agents/heuristic.py` | `heuristic` (kill chain) and `planner` (stealth-aware: quiet in the secure zone) |
 | **LLM** | `agents/llm_agents.py` | nothing in *mock* mode; `anthropic` + API key for *live* |
 | **RL** | `agents/rl_interface.py`, `agents/gym_env.py`, `train_rl.py` | nothing for the stub; `gymnasium` + `stable-baselines3` + `sb3-contrib` to train |
 
@@ -295,6 +296,8 @@ Edit `env/scenario.py` (`DEFAULT_CONFIG`) or pass a config dict to `Environment`
 | `escalate_detection` | odds an ESCALATE is logged |
 | `lateral_success` / `lateral_detection` | odds a pivot works / is logged |
 | `exfil_steps` / `exfil_detection` | EXFILTRATE turns needed / odds each one is logged |
+| `stealth_success_mult` / `stealth_detection_mult` | mode="stealth": success / detection multipliers |
+| `alert_fatigue` / `fatigue_capacity` | detection lost when the alert feed is swamped (0 = off) |
 | `analyst_budget` + `analyst_costs` | Blue's total action-points and per-action cost |
 | `max_steps` | game length / Red's time budget |
 

@@ -177,7 +177,7 @@ def _rl_demo(args) -> None:
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="Purple Team Red-vs-Blue simulation.")
-    p.add_argument("--red", default="heuristic", choices=["heuristic", "llm", "rl"])
+    p.add_argument("--red", default="heuristic", choices=["heuristic", "planner", "llm", "rl"])
     p.add_argument("--rl-model", default="models/ppo_red.zip",
                    help="Trained PPO model for --red rl (see train_rl.py).")
     p.add_argument("--blue", default="heuristic",

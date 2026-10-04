@@ -330,6 +330,8 @@ DEFAULT_CONFIG = {
     "exfil_detection": 0.8,        # base chance each EXFILTRATE turn is logged
     "stealth_success_mult": 0.55,  # mode="stealth": multiplies an action's success odds
     "stealth_detection_mult": 0.3, # mode="stealth": multiplies its detection odds (quieter)
+    "alert_fatigue": 0.0,          # 0 = off; up to this fraction of detection is lost when swamped
+    "fatigue_capacity": 15,        # visible-alert volume at which fatigue saturates
     "analyst_budget": 50,          # total action-points Blue may spend across a game (0 = unlimited)
     "analyst_costs": {"INVESTIGATE": 1, "PATCH": 2, "ISOLATE": 2, "RESTORE": 3,
                       "DECOY": 1, "ROTATE_CREDS": 2},

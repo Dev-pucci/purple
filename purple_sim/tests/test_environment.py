@@ -628,6 +628,45 @@ def test_scenario_json_rejects_malformed():
         assert "crown_jewel" in str(e)
 
 
+def test_alert_fatigue_degrades_detection_under_load():
+    def logged_rate(fatigue, n=200):
+        hits = 0
+        for s in range(n):
+            env = Environment(config={"seed": 900 + s, "noise_per_step": 8,
+                                      "lookalike_prob": 1.0, "alert_fatigue": fatigue,
+                                      "fatigue_capacity": 10, "max_steps": 20})
+            # let the feed fill with noise, then fire a guaranteed-detectable attack
+            for _ in range(12):
+                env.step(WAIT, MONITOR)
+            mark_scanned(env, "web_dmz")
+            v = env.nodes["web_dmz"].remote_vulns()[0]
+            v.success_prob, v.detection_prob = 1.0, 1.0
+            env.nodes["web_dmz"].sensors[Sensor.ENDPOINT] = 1.0
+            env.step(red("EXPLOIT", target="web_dmz"), MONITOR)
+            hits += any(e.node == "web_dmz" and e.kind == "EXPLOIT_ATTEMPT"
+                        for e in attack_events(env))
+        return hits / n
+    assert logged_rate(0.0) == 1.0                     # off: always logged
+    assert logged_rate(0.8) < 0.9                      # swamped: real alerts get missed
+
+
+def test_planner_red_goes_quiet_in_the_secure_zone():
+    env = Environment(config={"seed": 53})
+    planner = make_red("planner")
+    saw_stealth_in_secure = saw_loud_outside = False
+    while not env.done:
+        a = planner.act(env.red_view())
+        tgt = a.params.get("target", "")
+        seg = env.nodes.get(tgt).segment if tgt in env.nodes else ""
+        if a.type in ("EXPLOIT", "ESCALATE", "LATERAL_MOVE", "EXFILTRATE"):
+            if seg == "secure":
+                saw_stealth_in_secure = a.params.get("mode") == "stealth"
+            elif tgt and a.params.get("mode") != "stealth":
+                saw_loud_outside = True
+        env.step(a, MONITOR)
+    assert saw_stealth_in_secure and saw_loud_outside
+
+
 def test_decoy_catches_red_even_on_a_sensorless_host():
     env = Environment(config={"seed": 50, "noise_per_step": 0})
     give_foothold(env, "app_server")

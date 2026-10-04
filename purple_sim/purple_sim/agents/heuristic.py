@@ -95,6 +95,25 @@ class HeuristicRed(RedAgent):
                    for c in nodes[name]["connections"])
 
 
+class PlannerRed(HeuristicRed):
+    """A stealth-aware attacker: plays the same kill chain as HeuristicRed but
+    goes *quiet* (mode="stealth") on the highest-scrutiny moves — anything in the
+    secure zone or on the crown jewel — trading success odds for far lower
+    detection where the defender is watching hardest. Uses only what Red can see
+    (segment, crown-jewel flag), no privileged knowledge of sensors."""
+
+    QUIET_ACTIONS = {RedActionType.EXPLOIT.value, RedActionType.ESCALATE.value,
+                     RedActionType.LATERAL_MOVE.value, RedActionType.EXFILTRATE.value}
+
+    def act(self, red_view: dict) -> Action:
+        action = super().act(red_view)
+        if action.type in self.QUIET_ACTIONS:
+            info = red_view["nodes"].get(action.params.get("target", ""), {})
+            if info.get("is_crown_jewel") or info.get("segment") == "secure":
+                action.params["mode"] = "stealth"
+        return action
+
+
 class HeuristicBlue(BlueAgent):
     """SOC-analyst Blue: build suspicion from telemetry, then contain/patch/investigate,
     rationing a finite pool of analyst action-points.
