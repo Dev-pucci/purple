@@ -95,9 +95,13 @@ agent in the orchestrator.
 - **Default network only.** The observation and action table are built from a
   fixed node set, so RL uses the default scenario.
 
-Reference result (`train_rl.py`, 500k steps on CPU, 300 held-out games vs the
-heuristic Blue): see the table the script prints — MaskablePPO Red is trained to
-beat the heuristic-Red win rate.
+Reference result (`train_rl.py`, 600k steps on CPU, 300 held-out games vs the
+heuristic Blue, default network): MaskablePPO Red ~39% wins / 36% Blue coverage,
+heuristic Red ~37% / 38%, random valid-move Red ~0%. On this deeper model the
+full chain (scan → exploit → escalate → pivot → exfil) is harder to learn, so
+PPO only edges the scripted baseline at 600k steps but is already stealthier
+(lower coverage). Longer training widens the gap; `train_rl.py` prints the
+table so you can see where your run landed.
 
 ## How a turn works
 
